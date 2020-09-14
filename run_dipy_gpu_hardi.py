@@ -44,6 +44,8 @@ from dipy.data import small_sphere
 from dipy.reconst.shm import OpdtModel
 #from dipy.tracking.local import LocalTracking, ThresholdTissueClassifier
 from dipy.reconst import shm
+from dipy.data import get_fnames
+from dipy.data import read_stanford_pve_maps
 
 import nibabel as nib
 from nibabel.orientations import aff2axcodes
@@ -69,25 +71,27 @@ def get_img(ep2_seq):
 
 print("parsing arguments")
 parser = argparse.ArgumentParser()
-parser.add_argument("nifti_file", help="path to the ep2multiband sequence nifti file")
-parser.add_argument("bvals", help="path to the bvals")
-parser.add_argument("bvecs", help="path to the bvecs")
-parser.add_argument("mask_nifti", help="path to the mask file")
-parser.add_argument("roi_nifti", help="path to the ROI file")
 parser.add_argument("--output-prefix", type=str, default ='', help="path to the output file")
 parser.add_argument("--chunk-size", type=int, required=True, help="how many seeds to process per sweep, per GPU")
+parser.add_argument("--nseeds", type=int, default=None, help="how many seeds to process in total")
 parser.add_argument("--ngpus", type=int, required=True, help="number of GPUs to use")
 parser.add_argument("--use-fast-write", action='store_true', help="use fast file write")
 args = parser.parse_args()
 
-img = get_img(args.nifti_file)
+# Get Stanford HARDI data
+hardi_nifti_fname, hardi_bval_fname, hardi_bvec_fname = get_fnames('stanford_hardi')
+csf, gm, wm = read_stanford_pve_maps()
+wm_data = wm.get_fdata()
+
+img = get_img(hardi_nifti_fname)
 voxel_order = "".join(aff2axcodes(img.affine))
-gtab = get_gtab(args.bvals, args.bvecs)
-roi = get_img(args.roi_nifti)
-mask = get_img(args.mask_nifti)
-data = img.get_data()
-roi_data = roi.get_data()
-mask = mask.get_data()
+
+gtab = get_gtab(hardi_bval_fname, hardi_bvec_fname)
+#roi = get_img(hardi_nifti_fname)
+
+data = img.get_fdata()
+roi_data = (wm_data > 0.5)
+mask = roi_data
 
 tenmodel = dti.TensorModel(gtab, fit_method='WLS')
 print('Fitting Tensor')
@@ -102,6 +106,7 @@ metric_map = np.asarray(FA, 'float64')
 
 # Create seeds for ROI
 seed_mask = utils.seeds_from_mask(roi_data, density=3, affine=np.eye(4))
+seed_mask = seed_mask[0:args.nseeds]
 
 # Setup model
 print('slowadcodf')
@@ -163,14 +168,16 @@ for idx in range(int(nchunks)):
     if args.use_fast_write:
       prefix = "{}.{}_{}".format(args.output_prefix, idx+1, nchunks)
       ts = time.time()
-      gpu_tracker.dump_streamlines(prefix, voxel_order, roi.shape, roi.header.get_zooms(), img.affine)
+      #gpu_tracker.dump_streamlines(prefix, voxel_order, roi.shape, roi.header.get_zooms(), img.affine)
+      gpu_tracker.dump_streamlines(prefix, voxel_order, wm.shape, wm.header.get_zooms(), img.affine)
       te = time.time()
       print("Saved streamlines to {}_*.trk, time {} s".format(prefix, te-ts))
     else:
       fname = "{}.{}_{}.trk".format(args.output_prefix, idx+1, nchunks)
       ts = time.time()
       #save_tractogram(fname, streamlines, img.affine, vox_size=roi.header.get_zooms(), shape=roi_data.shape)
-      sft = StatefulTractogram(streamlines, args.nifti_file, Space.VOX)
+      #save_tractogram(fname, streamlines)
+      sft = StatefulTractogram(streamlines, hardi_nifti_fname, Space.VOX)
       save_tractogram(sft, fname)
       te = time.time()
       print("Saved streamlines to {}, time {} s".format(fname, te-ts))

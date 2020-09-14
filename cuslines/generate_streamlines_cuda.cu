@@ -67,7 +67,6 @@ __device__ const int fixedPerm[] = {44, 47, 53,  0,  3,  3, 39,  9, 19, 21, 50, 
 
 
 template<int BDIM_X,
-         int N32DIMT,
          typename REAL_T,
          typename REAL3_T>
 __device__ int trilinear_interp_d(const int dimx,
@@ -118,10 +117,7 @@ __device__ int trilinear_interp_d(const int dimx,
         coo[2][1] = MIN(dimz-1, coo[2][0]+1);
 
         //#pragma unroll
-        for(int t = 0; t < N32DIMT; t += BDIM_X) {
-                if (t+tidx >= dimt) {
-                        break;
-                }
+        for(int t = tidx; t < dimt; t += BDIM_X) {
 
                 REAL_T __tmp = 0;
 
@@ -135,7 +131,7 @@ __device__ int trilinear_interp_d(const int dimx,
                                                  dataf[coo[0][i]*dimy*dimz*dimt +
                                                        coo[1][j]*dimz*dimt +
                                                        coo[2][k]*dimt +
-                                                       t+tidx];
+                                                       t];
                                         /*
                                         if (tidx == 0 && threadIdx.y == 0 && t==0) {
                                                 printf("wgh[0][%d]: %f, wgh[1][%d]: %f, wgh[2][%d]: %f\n",
@@ -150,7 +146,7 @@ __device__ int trilinear_interp_d(const int dimx,
                                 }
                         }
                 }
-                __vox_data[t+tidx] = __tmp;
+                __vox_data[t] = __tmp;
         }
 #if 0
         __syncwarp(WMASK);
@@ -363,10 +359,10 @@ __device__ void ndotp_log_d(const int N,
 }
 
 template<int BDIM_X,
-         int N,
          typename LEN_T,
          typename VAL_T>
-__device__ VAL_T max_mask_transl_d(const LEN_T *__restrict__ srcMsk,
+__device__ VAL_T max_mask_transl_d(const int n,
+				   const LEN_T *__restrict__ srcMsk,
                                    const VAL_T *__restrict__ srcVal,
                                    const VAL_T offset,
                                    const VAL_T minVal) {
@@ -378,14 +374,11 @@ __device__ VAL_T max_mask_transl_d(const LEN_T *__restrict__ srcMsk,
 
         VAL_T __m = minVal;
 
-        #pragma unroll
-        for(int i = 0; i < N; i += BDIM_X) {
-                if (i+tidx < N) {
-                        const LEN_T sel = srcMsk[i+tidx];
-                        if (sel > 0) {
-                                __m = MAX(__m, srcVal[i+tidx]+offset);
-                        }
-                }
+        for(int i = tidx; i < n; i += BDIM_X) {
+		const LEN_T sel = srcMsk[i];
+		if (sel > 0) {
+			__m = MAX(__m, srcVal[i]+offset);
+		}
         }
 
         #pragma unroll
@@ -398,9 +391,8 @@ __device__ VAL_T max_mask_transl_d(const LEN_T *__restrict__ srcMsk,
 }
 
 template<int BDIM_X,
-         int N,
          typename VAL_T>
-__device__ VAL_T max_d(const VAL_T *__restrict__ src, const VAL_T minVal) {
+__device__ VAL_T max_d(const int n, const VAL_T *__restrict__ src, const VAL_T minVal) {
 
         const int tidx = threadIdx.x;
 
@@ -409,11 +401,8 @@ __device__ VAL_T max_d(const VAL_T *__restrict__ src, const VAL_T minVal) {
 
         VAL_T __m = minVal;
 
-        #pragma unroll
-        for(int i = 0; i < N; i += BDIM_X) {
-                if (i+tidx < N) {
-                        __m = MAX(__m, src[i+tidx]);
-                }
+        for(int i = tidx; i < n; i += BDIM_X) {
+		__m = MAX(__m, src[i]);
         }
 
         #pragma unroll
@@ -426,9 +415,8 @@ __device__ VAL_T max_d(const VAL_T *__restrict__ src, const VAL_T minVal) {
 }
 
 template<int BDIM_X,
-         int N,
          typename VAL_T>
-__device__ VAL_T min_d(const VAL_T *__restrict__ src, const VAL_T maxVal) {
+__device__ VAL_T min_d(const int n, const VAL_T *__restrict__ src, const VAL_T maxVal) {
 
         const int tidx = threadIdx.x;
 
@@ -437,11 +425,8 @@ __device__ VAL_T min_d(const VAL_T *__restrict__ src, const VAL_T maxVal) {
 
         VAL_T __m = maxVal;
 
-        #pragma unroll
-        for(int i = 0; i < N; i += BDIM_X) {
-                if (i+tidx < N) {
-                        __m = MIN(__m, src[i+tidx]);
-                }
+        for(int i = tidx; i < n; i += BDIM_X) {
+		__m = MIN(__m, src[i]);
         }
 
         #pragma unroll
@@ -452,10 +437,40 @@ __device__ VAL_T min_d(const VAL_T *__restrict__ src, const VAL_T maxVal) {
 
         return __m;
 }
+			
+template<int BDIM_X,
+         typename VAL_T>
+__device__ VAL_T avgMask(const int mskLen,
+			 const int *__restrict__ mask,
+			 const VAL_T *__restrict__ data) {
+        
+	const int tidx = threadIdx.x;
+        const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
+
+        const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
+
+        int   __myCnt = 0;
+        VAL_T __mySum = 0;
+
+        for(int i = tidx; i < mskLen; i += BDIM_X) {
+		if(mask[i]) {
+			__myCnt++;
+			__mySum += data[i];
+		}
+        }
+
+        #pragma unroll
+        for(int i = BDIM_X/2; i; i /= 2) {
+                __mySum += __shfl_xor_sync(WMASK, __mySum, i, BDIM_X);
+                __myCnt += __shfl_xor_sync(WMASK, __myCnt, i, BDIM_X);
+        }
+
+        return __mySum/__myCnt;
+
+}
 
 template<int BDIM_X,
          int BDIM_Y,
-         int SAMPLM_NR,
          typename REAL_T,
          typename REAL3_T>
 __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
@@ -463,27 +478,26 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
                                  const REAL3_T *__restrict__ sphere_vertices,
                                  const int2 *__restrict__ sphere_edges,
                                  const int num_edges,
+				 int samplm_nr,
+				 int *__restrict__ __shInd,
                                  const REAL_T relative_peak_thres=static_cast<REAL_T>(0.5),
                                  const REAL_T min_separation_angle=static_cast<REAL_T>(0.4363323129985824)) { // 20 degrees in rads
 
         const int tidx = threadIdx.x;
-        const int tidy = threadIdx.y;
 
         const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
         const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
 
         const unsigned int lmask = (1 << lid)-1;
 
-        __shared__ int __shInd[BDIM_Y][SAMPLM_NR];
+//        __shared__ int __shInd[BDIM_Y][SAMPLM_NR];
 
         #pragma unroll
-        for(int j = 0; j < SAMPLM_NR; j += BDIM_X) {
-                if (j+tidx < SAMPLM_NR) {
-                        __shInd[tidy][j+tidx] = 0;
-                }
+        for(int j = tidx; j < samplm_nr; j += BDIM_X) {
+		__shInd[j] = 0;
         }
 
-        REAL_T odf_min = min_d<BDIM_X, SAMPLM_NR>(odf, REAL_MAX);
+        REAL_T odf_min = min_d<BDIM_X>(samplm_nr, odf, REAL_MAX);
         odf_min = MAX(0, odf_min);
 
         __syncwarp(WMASK);
@@ -509,17 +523,17 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
                         //        __shInd[tidy][u_val < v_val ? u_ind : v_ind] = -1; // benign race conditions...
                         //}
                         if (u_val < v_val) {
-                                atomicExch(__shInd[tidy]+u_ind, -1);
-                                atomicOr(  __shInd[tidy]+v_ind,  1);
+                                atomicExch(__shInd+u_ind, -1);
+                                atomicOr(  __shInd+v_ind,  1);
                         } else if (v_val < u_val) {
-                                atomicExch(__shInd[tidy]+v_ind, -1);
-                                atomicOr(  __shInd[tidy]+u_ind,  1);
+                                atomicExch(__shInd+v_ind, -1);
+                                atomicOr(  __shInd+u_ind,  1);
                         }
                 }
         }
         __syncwarp(WMASK);
 
-        const REAL_T compThres = relative_peak_thres*max_mask_transl_d<BDIM_X, SAMPLM_NR>(__shInd[tidy], odf, -odf_min, REAL_MIN);
+        const REAL_T compThres = relative_peak_thres*max_mask_transl_d<BDIM_X>(samplm_nr, __shInd, odf, -odf_min, REAL_MIN);
 #if 1
 /*
         if (!tidy && !tidx) {
@@ -532,17 +546,17 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
 */
         // compact indices of positive values to the right
         int n = 0;
-        #pragma unroll
-        for(int j = 0; j < SAMPLM_NR; j += BDIM_X) {
 
-                const int __v = (j+tidx < SAMPLM_NR) ? __shInd[tidy][j+tidx] : -1;
+        for(int j = 0; j < samplm_nr; j += BDIM_X) {
+
+                const int __v = (j+tidx < samplm_nr) ? __shInd[j+tidx] : -1;
                 const int __keep = (__v > 0) && ((odf[j+tidx]-odf_min) >= compThres);
                 const int __msk = __ballot_sync(WMASK, __keep);
 
 //__syncwarp(WMASK); // unnecessary
                 if (__keep) {
                         const int myoff = __popc(__msk & lmask);
-                        __shInd[tidy][n + myoff] = j+tidx;
+                        __shInd[n + myoff] = j+tidx;
                 }
                 n += __popc(__msk);
 //__syncwarp(WMASK); // should be unnecessary
@@ -562,14 +576,14 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
                 REAL_T k = REAL_MIN;
                 int    v = 0;
                 if (tidx < n) {
-                        v = __shInd[tidy][tidx];
+                        v = __shInd[tidx];
                         k = odf[v];
                 }
                 warp_sort<32, BDIM_X, WSORT_DIR_DEC>(&k, &v);
                 __syncwarp(WMASK);
 
                 if (tidx < n) {
-                        __shInd[tidy][tidx] = v;
+                        __shInd[tidx] = v;
                 }
         } else {
                 // ERROR !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -584,12 +598,12 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
                 if (tidx == 0) {
                         const REAL_T cos_similarity = COS(min_separation_angle);
 
-                        dirs[0] = sphere_vertices[__shInd[tidy][0]];
+                        dirs[0] = sphere_vertices[__shInd[0]];
 
                         int k = 1;
                         for(int i = 1; i < n; i++) {
 
-                                const REAL3_T abc = sphere_vertices[__shInd[tidy][i]];
+                                const REAL3_T abc = sphere_vertices[__shInd[i]];
 
                                 int j = 0;
                                 for(; j < k; j++) {
@@ -710,11 +724,82 @@ __device__ int closest_peak_d(const REAL3_T  direction, //dir
 }
 
 template<int BDIM_X,
+	 typename LEN_T,
+	 typename MSK_T,
+	 typename VAL_T>
+__device__ LEN_T maskGet(const LEN_T n, 
+			 const MSK_T *__restrict__ mask,
+			 const VAL_T *__restrict__ plain,
+			       VAL_T *__restrict__ masked) {
+
+	const int tidx = threadIdx.x;
+	
+        const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
+        const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
+
+	const int __laneMask = (1 << tidx)-1;
+
+	int woff = 0;
+	for(int j = 0; j < n; j += BDIM_X) {
+
+		const int __act = (j+tidx < n) ? !mask[j+tidx] : 0;
+		const int __msk = __ballot_sync(WMASK, __act);
+
+		const int toff = __popc(__msk & __laneMask);
+		if (__act) {
+			masked[woff+toff] = plain[j+tidx];
+		}
+		woff += __popc(__msk);
+	}
+	return woff;
+}
+
+template<int BDIM_X,
+	 typename LEN_T,
+	 typename MSK_T,
+	 typename VAL_T>
+__device__ void maskPut(const LEN_T n, 
+			const MSK_T *__restrict__ mask,
+			const VAL_T *__restrict__ masked,
+			      VAL_T *__restrict__ plain) {
+
+	const int tidx = threadIdx.x;
+	
+        const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
+        const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
+
+	const int __laneMask = (1 << tidx)-1;
+
+	int woff = 0;
+	for(int j = 0; j < n; j += BDIM_X) {
+
+		const int __act = (j+tidx < n) ? !mask[j+tidx] : 0;
+		const int __msk = __ballot_sync(WMASK, __act);
+
+		const int toff = __popc(__msk & __laneMask);
+		if (__act) {
+			plain[j+tidx] = masked[woff+toff];
+		}
+		woff += __popc(__msk);
+	}
+	return;
+}
+
+template<typename REAL_T>
+__device__ void printArray(const char *name, int ncol, int n, REAL_T *arr) {
+	if (!threadIdx.x && !threadIdx.y && !blockIdx.x) {
+		printf("%s:\n", name);
+
+		for(int j = 0; j < n; j++) {
+			if ((j%ncol)==0) printf("\n");
+			printf("%10.8f ", arr[j]);
+		}
+		printf("\n");
+	}
+}
+
+template<int BDIM_X,
          int BDIM_Y,
-         //int HR_SIDE,
-         int DELTA_NR,
-         int SAMPLM_NR,
-         int N32DIMT,
          int NATTEMPTS,
          typename REAL_T,
          typename REAL3_T>
@@ -735,8 +820,10 @@ __device__ int get_direction_d(curandStatePhilox4_32_10_t *st,
                                // max_angle, pmf_threshold from global defines
                                // b0s_mask already passed
                                // min_signal from global defines
+			       const int delta_nr,
                                const REAL_T *__restrict__ delta_b,
                                const REAL_T *__restrict__ delta_q, // fit_matrix
+			       const int samplm_nr,
                                const REAL_T *__restrict__ sampling_matrix,
                                const REAL3_T *__restrict__ sphere_vertices,
                                const int2 *__restrict__ sphere_edges,
@@ -745,120 +832,164 @@ __device__ int get_direction_d(curandStatePhilox4_32_10_t *st,
 
         const int tidx = threadIdx.x;
         const int tidy = threadIdx.y;
-
+	
         const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
         const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
 
-        // init = (NATTEMPTS == 1)
-        __shared__ REAL_T __vox_data_sh[BDIM_Y][N32DIMT];
+	const int n32dimt = ((dimt+31)/32)*32;
 
-        const int hr_side = dimt-1;
+	extern REAL_T __shared__ __sh[];
+
+	REAL_T *__vox_data_sh = reinterpret_cast<REAL_T *>(__sh);
+	REAL_T *__msk_data_sh = __vox_data_sh + BDIM_Y*n32dimt;
+
+	REAL_T *__r_sh = __msk_data_sh + BDIM_Y*n32dimt;
+	REAL_T *__h_sh = __r_sh + BDIM_Y*MAX(n32dimt, samplm_nr);
+
+	__vox_data_sh += tidy*n32dimt;
+	__msk_data_sh += tidy*n32dimt;
+
+	__r_sh += tidy*MAX(n32dimt, samplm_nr);
+	__h_sh += tidy*MAX(n32dimt, samplm_nr);
+	
+	// compute hr_side (may be passed from python)
+	int hr_side = 0;
+	for(int j = tidx; j < dimt; j += BDIM_X) {
+		hr_side += !b0s_mask[j] ? 1 : 0;
+	}
+        #pragma unroll
+        for(int i = BDIM_X/2; i; i /= 2) {
+                hr_side += __shfl_xor_sync(WMASK, hr_side, i, BDIM_X);
+        }
 
         #pragma unroll
         for(int i = 0; i < NATTEMPTS; i++) {
 
-                __shared__ REAL_T __r_sh[BDIM_Y][MAX(/*HR_SIDE*/N32DIMT, SAMPLM_NR)];
-                __shared__ REAL_T __h_sh[BDIM_Y][MAX(/*HR_SIDE*/N32DIMT, SAMPLM_NR)];
+                const int rv = trilinear_interp_d<BDIM_X>(dimx, dimy, dimz, dimt, dataf, point, __vox_data_sh);
 
-                const int rv = trilinear_interp_d<BDIM_X, N32DIMT>(dimx, dimy, dimz, dimt, dataf, point, __vox_data_sh[tidy]);
+		const int nmsk = maskGet<BDIM_X>(dimt, b0s_mask, __vox_data_sh, __msk_data_sh);
+
+		//if (!tidx && !threadIdx.y && !blockIdx.x) {
+		//
+		//	printf("interp of %f, %f, %f\n", point.x, point.y, point.z);
+		//	printf("hr_side: %d\n", hr_side);
+		//	printArray("vox_data", 6, dimt, __vox_data_sh[tidy]);
+		//	printArray("msk_data", 6, nmsk, __msk_data_sh[tidy]);
+		//}
+		//break;
+
                 __syncwarp(WMASK);
 
                 if (rv == 0) {
 
-                        //copy_d<BDIM_X, HR_SIDE>(__msk_data_sh[tidy],
-                        //                        __vox_data_sh[tidy]+1);
-                        //__syncwarp(WMASK);
+                        ndotp_d<BDIM_X>(hr_side, hr_side, __msk_data_sh, R, __r_sh);
+			//__syncwarp();
+			//printArray("__r", 5, hr_side*hr_side, R);
+			//printArray("__r_sh", 6, hr_side, __r_sh[tidy]);
 
-                        //ndotp_d<BDIM_X, HR_SIDE, HR_SIDE>(__vox_data_sh[tidy]+1, R, __r_sh[tidy]);
-                        //ndotp_d<BDIM_X, HR_SIDE, HR_SIDE>(__vox_data_sh[tidy]+1, H, __h_sh[tidy]);
-                        ndotp_d<BDIM_X>(hr_side, hr_side, __vox_data_sh[tidy]+1, R, __r_sh[tidy]);
-                        ndotp_d<BDIM_X>(hr_side, hr_side, __vox_data_sh[tidy]+1, H, __h_sh[tidy]);
+                        ndotp_d<BDIM_X>(hr_side, hr_side, __msk_data_sh, H, __h_sh);
+			//__syncwarp();
+			//printArray("__h_sh", 6, hr_side, __h_sh[tidy]);
 
-                        const REAL_T denom = MAX(MIN_SIGNAL_P, __vox_data_sh[tidy][0]);
                         __syncwarp(WMASK);
 
-                        //#pragma unroll
                         for(int j = 0; j < hr_side; j += BDIM_X) {
                                 if (j+tidx < hr_side) {
 #ifdef USE_FIXED_PERMUTATION
                                         const int srcPermInd = fixedPerm[j+tidx];
 #else
-                                        const int srcPermInd = curand(st) % hr_side; //(HR_SIDE-1);
+                                        const int srcPermInd = curand(st) % hr_side;
 //                                        if (srcPermInd < 0 || srcPermInd >= hr_side) {
 //                                                printf("srcPermInd: %d\n", srcPermInd);
 //                                        }
 #endif
-                                        __vox_data_sh[tidy][1+j+tidx] = MAX(MIN_SIGNAL_P,
-                                                                            __h_sh[tidy][j+tidx] + __r_sh[tidy][srcPermInd]) / denom;
+					__h_sh[j+tidx] += __r_sh[srcPermInd];
                                 }
                         }
-                        if (!tidx) {
-                                __vox_data_sh[tidy][0] = static_cast<REAL_T>(1.0);
-                        }
-                        __syncwarp(WMASK);
-#if 0
-                        if (!threadIdx.y && threadIdx.x == 0) {
-                                for(int j = 0; j < 1+HR_SIDE; j++) {
-                                        printf("vox_norm[%d]: %f\n", j, __vox_data_sh[tidy][j]);
-                                }
-                        }
-                        __syncwarp(WMASK);
-#endif
+			__syncwarp(WMASK);
 
-                        //ndotp_log_d<BDIM_X, DELTA_NR, HR_SIDE>(__vox_data_sh[tidy]+1, delta_q, __r_sh[tidy]);
-                        //ndotp_d    <BDIM_X, DELTA_NR, HR_SIDE>(__vox_data_sh[tidy]+1, delta_b, __h_sh[tidy]);
-                        ndotp_log_d<BDIM_X>(DELTA_NR, hr_side, __vox_data_sh[tidy]+1, delta_q, __r_sh[tidy]);
-                        ndotp_d    <BDIM_X>(DELTA_NR, hr_side, __vox_data_sh[tidy]+1, delta_b, __h_sh[tidy]);
+			//printArray("h+perm(r):", 6, hr_side, __h_sh[tidy]);
+			//__syncwarp();
+		
+			// vox_data[dwi_mask] = masked_data
+			maskPut<BDIM_X>(dimt, b0s_mask, __h_sh, __vox_data_sh);
+			__syncwarp(WMASK);
+
+			//printArray("vox_data[dwi_mask]:", 6, dimt, __vox_data_sh[tidy]);
+			//__syncwarp();
+
+			for(int j = tidx; j < dimt; j += BDIM_X) {
+				__vox_data_sh[j] = MAX(MIN_SIGNAL_P, __vox_data_sh[j]);
+			}
+			__syncwarp(WMASK);
+
+			const REAL_T denom = avgMask<BDIM_X>(dimt, b0s_mask, __vox_data_sh);
+
+			for(int j = tidx; j < dimt; j += BDIM_X) {
+				__vox_data_sh[j] /= denom;
+			}
+			__syncwarp();
+
+			//if (!tidx && !threadIdx.y && !blockIdx.x) {
+			//	printf("denom: %f\n", denom);
+			//}
+			////break;
+			//if (!tidx && !threadIdx.y && !blockIdx.x) {
+			//
+			//	printf("__vox_data_sh:\n");
+			//	printArray("vox_data", 6, dimt, __vox_data_sh[tidy]);
+			//}
+			//break;
+
+			maskGet<BDIM_X>(dimt, b0s_mask, __vox_data_sh, __msk_data_sh);
+			__syncwarp(WMASK);
+
+                        ndotp_log_d<BDIM_X>(delta_nr, hr_side, __msk_data_sh, delta_q, __r_sh);
+                        ndotp_d    <BDIM_X>(delta_nr, hr_side, __msk_data_sh, delta_b, __h_sh);
+
                         __syncwarp(WMASK);
 
                         #pragma unroll
-                        for(int j = 0; j < DELTA_NR; j += BDIM_X) {
-                                if (j+tidx < DELTA_NR) {
-                                        __r_sh[tidy][j+tidx] -= __h_sh[tidy][j+tidx];
-                                }
+                        for(int j = tidx; j < delta_nr; j += BDIM_X) {
+				__r_sh[j] -= __h_sh[j];
                         }
                         __syncwarp(WMASK);
                         // __r_sh[tidy] <- python 'coef'
 
-                        ndotp_d<BDIM_X, SAMPLM_NR, DELTA_NR>(__r_sh[tidy], sampling_matrix, __h_sh[tidy]);
-                        //ndotp_d<BDIM_X>(SAMPLM_NR, DELTA_NR, __r_sh[tidy], sampling_matrix, __h_sh[tidy]);
+                        ndotp_d<BDIM_X>(samplm_nr, delta_nr, __r_sh, sampling_matrix, __h_sh);
 
                         // __h_sh[tidy] <- python 'pmf'
                 } else {
                         #pragma unroll
-                        for(int j = 0; j < SAMPLM_NR; j += BDIM_X) {
-                                if (j+tidx < SAMPLM_NR) {
-                                        __h_sh[tidy][j+tidx] = 0;
-                                }
+                        for(int j = tidx; j < samplm_nr; j += BDIM_X) {
+				__h_sh[j] = 0;
                         }
                         // __h_sh[tidy] <- python 'pmf'
                 }
                 __syncwarp(WMASK);
 #if 0
                 if (!threadIdx.y && threadIdx.x == 0) {
-                        for(int j = 0; j < SAMPLM_NR; j++) {
+                        for(int j = 0; j < samplm_nr; j++) {
                                 printf("pmf[%d]: %f\n", j, __h_sh[tidy][j]);
                         }
                 }
                 //return;
 #endif
-                const REAL_T abs_pmf_thr = PMF_THRESHOLD_P*max_d<BDIM_X, SAMPLM_NR>(__h_sh[tidy], REAL_MIN);
+                const REAL_T abs_pmf_thr = PMF_THRESHOLD_P*max_d<BDIM_X>(samplm_nr, __h_sh, REAL_MIN);
                 __syncwarp(WMASK);
 
                 #pragma unroll
-                for(int j = 0; j < SAMPLM_NR; j += BDIM_X) {
-                        if (j+tidx < SAMPLM_NR) {
-                                const REAL_T __v = __h_sh[tidy][j+tidx];
-                                if (__v < abs_pmf_thr) {
-                                        __h_sh[tidy][j+tidx] = 0;
-                                }
-                        }
+                for(int j = tidx; j < samplm_nr; j += BDIM_X) {
+			const REAL_T __v = __h_sh[j];
+			if (__v < abs_pmf_thr) {
+				__h_sh[j] = 0;
+			}
                 }
                 __syncwarp(WMASK);
 #if 0
                 if (!threadIdx.y && threadIdx.x == 0) {
                         printf("abs_pmf_thr: %f\n", abs_pmf_thr);
-                        for(int j = 0; j < SAMPLM_NR; j++) {
+                        for(int j = 0; j < samplm_nr; j++) {
                                 printf("pmfNORM[%d]: %f\n", j, __h_sh[tidy][j]);
                         }
                 }
@@ -874,11 +1005,12 @@ __device__ int get_direction_d(curandStatePhilox4_32_10_t *st,
                                 return closest_peak(directions, peaks, cos_similarity)
 #endif
                 const int ndir = peak_directions_d<BDIM_X,
-                                                   BDIM_Y,
-                                                   SAMPLM_NR>(__h_sh[tidy], dirs,
-                                                              sphere_vertices,
-                                                              sphere_edges,
-                                                              num_edges);
+                                                   BDIM_Y>(__h_sh, dirs,
+                                                           sphere_vertices,
+                                                           sphere_edges,
+                                                           num_edges,
+							   samplm_nr,
+							   reinterpret_cast<int *>(__r_sh)); // reuse __r_sh as shInd in func which is large enough
                 if (NATTEMPTS == 1) { // init=True...
                         return ndir; // and dirs;
                 } else { // init=False...
@@ -907,7 +1039,6 @@ enum {OUTSIDEIMAGE, INVALIDPOINT, TRACKPOINT, ENDPOINT};
 
 template<int BDIM_X,
          int BDIM_Y,
-         int N32DIMT,
          typename REAL_T,
          typename REAL3_T>
 __device__ int check_point_d(const REAL3_T point,
@@ -923,7 +1054,7 @@ __device__ int check_point_d(const REAL3_T point,
 
         __shared__ REAL_T __shInterpOut[BDIM_Y];
 
-        const int rv = trilinear_interp_d<BDIM_X, N32DIMT>(dimx, dimy, dimz, 1, metric_map, point, __shInterpOut+tidy);
+        const int rv = trilinear_interp_d<BDIM_X>(dimx, dimy, dimz, 1, metric_map, point, __shInterpOut+tidy);
         __syncwarp(WMASK);
 #if 0
         if (threadIdx.y == 1 && threadIdx.x == 0) {
@@ -938,10 +1069,6 @@ __device__ int check_point_d(const REAL3_T point,
 
 template<int BDIM_X,
          int BDIM_Y,
-         //int HR_SIDE,
-         int DELTA_NR,
-         int SAMPLM_NR,
-         int N32DIMT,
          typename REAL_T,
          typename REAL3_T>
 __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
@@ -964,8 +1091,10 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                          // tc_threashold from global defines
                          // pmf_threashold from global defines
                          const REAL_T *__restrict__ metric_map,
+			 const int delta_nr,
                          const REAL_T *__restrict__ delta_b,
                          const REAL_T *__restrict__ delta_q, // fit_matrix
+			 const int samplm_nr,
                          const REAL_T *__restrict__ sampling_matrix,
                          const REAL3_T *__restrict__ sphere_vertices,
                          const int2 *__restrict__ sphere_edges,
@@ -1001,10 +1130,6 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
 		// call get_direction_d() with NATTEMPTS=5
                 int ndir = get_direction_d<BDIM_X,
                                            BDIM_Y,
-                                           //HR_SIDE,
-                                           DELTA_NR,
-                                           SAMPLM_NR,
-                                           N32DIMT,
                                            5>(st,
                                               direction,
                                               dimx, dimy, dimz, dimt, dataf,
@@ -1015,7 +1140,9 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                                               // max_angle, pmf_threshold from global defines
                                               // b0s_mask already passed
                                               // min_signal from global defines
+					      delta_nr,
                                               delta_b, delta_q, // fit_matrix
+					      samplm_nr,
                                               sampling_matrix,
                                               sphere_vertices,
                                               sphere_edges,
@@ -1048,7 +1175,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                 }
                 __syncwarp(WMASK);
 
-                tissue_class = check_point_d<BDIM_X, BDIM_Y, N32DIMT>(point, dimx, dimy, dimz, metric_map); 
+                tissue_class = check_point_d<BDIM_X, BDIM_Y>(point, dimx, dimy, dimz, metric_map); 
 
                 if (tissue_class == ENDPOINT ||
                     tissue_class == INVALIDPOINT ||
@@ -1063,10 +1190,6 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
 
 template<int BDIM_X,
          int BDIM_Y,
-         //int HR_SIDE,
-         int DELTA_NR,
-         int SAMPLM_NR, // == len(sphere.theta)
-         int N32DIMT,
          typename REAL_T,
          typename REAL3_T>
 __global__ void getNumStreamlines_k(const long long rndSeed,
@@ -1080,9 +1203,11 @@ __global__ void getNumStreamlines_k(const long long rndSeed,
                                     const REAL_T *__restrict__ dataf,
                                     const REAL_T *__restrict__ H,
                                     const REAL_T *__restrict__ R,
+				    const int delta_nr,
                                     const REAL_T *__restrict__ delta_b,
                                     const REAL_T *__restrict__ delta_q,
                                     const int  *__restrict__ b0s_mask, // change to int
+				    const int samplm_nr,
                                     const REAL_T *__restrict__ sampling_matrix,
                                     const REAL3_T *__restrict__ sphere_vertices,
                                     const int2 *__restrict__ sphere_edges,
@@ -1100,7 +1225,7 @@ __global__ void getNumStreamlines_k(const long long rndSeed,
         REAL3_T seed = seeds[slid]; 
         // seed = lin_mat*seed + offset
 
-        REAL3_T *__restrict__ __shDir = shDir0+slid*SAMPLM_NR;
+        REAL3_T *__restrict__ __shDir = shDir0+slid*samplm_nr;
 
 	const int hr_side = dimt-1;
 
@@ -1111,12 +1236,13 @@ __global__ void getNumStreamlines_k(const long long rndSeed,
         //directions = get_direction(None, dataf, dwi_mask, sphere, s, H, R, model, max_angle,
         //                pmf_threshold, b0s_mask, min_signal, fit_matrix,
         //                sampling_matrix, init=True)
+
+	//if (!tidx && !threadIdx.y && !blockIdx.x) {
+	//	printf("seed: %f, %f, %f\n", seed.x, seed.y, seed.z);
+	//}
+
         int ndir = get_direction_d<BDIM_X,
                                    BDIM_Y,
-                                   //HR_SIDE,
-                                   DELTA_NR,
-                                   SAMPLM_NR,
-                                   N32DIMT,
                                    1>(&st,
                                       MAKE_REAL3(0,0,0),
                                       dimx, dimy, dimz, dimt, dataf,
@@ -1127,7 +1253,9 @@ __global__ void getNumStreamlines_k(const long long rndSeed,
                                       // max_angle, pmf_threshold from global defines
                                       // b0s_mask already passed
                                       // min_signal from global defines
+				      delta_nr,
                                       delta_b, delta_q, // fit_matrix
+				      samplm_nr,
                                       sampling_matrix,
                                       sphere_vertices,
                                       sphere_edges,
@@ -1135,6 +1263,14 @@ __global__ void getNumStreamlines_k(const long long rndSeed,
                                       __shDir);
         if (tidx == 0) {
                 slineOutOff[slid] = ndir;
+
+		//if (!tidx && !threadIdx.y && !blockIdx.x) {
+		//	printf("ndir: %d\n", ndir);
+		//	for(int i = 0; i < ndir; i++) {
+		//		printf("%f %f %f\n", __shDir[i].x, __shDir[i].y, __shDir[i].z);	
+		//	}
+		//}
+
         }
 
         return;
@@ -1142,10 +1278,6 @@ __global__ void getNumStreamlines_k(const long long rndSeed,
 
 template<int BDIM_X,
          int BDIM_Y,
-         //int HR_SIDE,
-         int DELTA_NR,
-         int SAMPLM_NR, // == len(sphere.theta)
-         int N32DIMT,
          typename REAL_T,
          typename REAL3_T>
 __global__ void genStreamlinesMerge_k(const long long rndSeed,
@@ -1159,10 +1291,12 @@ __global__ void genStreamlinesMerge_k(const long long rndSeed,
                                       const REAL_T *__restrict__ dataf,
                                       const REAL_T *__restrict__ H,
                                       const REAL_T *__restrict__ R,
+				      const int delta_nr,
                                       const REAL_T *__restrict__ delta_b,
                                       const REAL_T *__restrict__ delta_q,
                                       const int    *__restrict__ b0s_mask, // change to int
                                       const REAL_T *__restrict__ metric_map,
+				      const int samplm_nr,
                                       const REAL_T *__restrict__ sampling_matrix,
                                       const REAL3_T *__restrict__ sphere_vertices,
                                       const int2 *__restrict__ sphere_edges,
@@ -1209,7 +1343,7 @@ __global__ void genStreamlinesMerge_k(const long long rndSeed,
 
         for(int i = 0; i < ndir; i++) {
 
-                REAL3_T first_step = shDir0[slid*SAMPLM_NR + i];
+                REAL3_T first_step = shDir0[slid*samplm_nr + i];
 
 		REAL3_T *__restrict__ currSline = sline + slineOff*MAX_SLINE_LEN*2;
 
@@ -1223,26 +1357,24 @@ __global__ void genStreamlinesMerge_k(const long long rndSeed,
 #endif
                 int stepsB;
                 const int tissue_classB = tracker_d<BDIM_X,
-                                                    BDIM_Y,
-                                                    //HR_SIDE,
-                                                    DELTA_NR,
-                                                    SAMPLM_NR,
-                                                    N32DIMT>(&st,
-                                                             seed,
-                                                             MAKE_REAL3(-first_step.x, -first_step.y, -first_step.z),
-                                                             MAKE_REAL3(1, 1, 1),
-                                                             dimx, dimy, dimz, dimt, dataf,
-                                                             b0s_mask,
-                                                             H, R,
-                                                             metric_map,
-                                                             delta_b, delta_q, //fit_matrix
-                                                             sampling_matrix,
-                                                             sphere_vertices,
-                                                             sphere_edges,
-                                                             num_edges,
-                                                             shDir1 + slid*SAMPLM_NR,
-                                                             &stepsB,
-                                                             currSline);
+                                                    BDIM_Y>(&st,
+                                                            seed,
+                                                            MAKE_REAL3(-first_step.x, -first_step.y, -first_step.z),
+                                                            MAKE_REAL3(1, 1, 1),
+                                                            dimx, dimy, dimz, dimt, dataf,
+                                                            b0s_mask,
+                                                            H, R,
+                                                            metric_map,
+							    delta_nr,
+                                                            delta_b, delta_q, //fit_matrix
+							    samplm_nr,
+                                                            sampling_matrix,
+                                                            sphere_vertices,
+                                                            sphere_edges,
+                                                            num_edges,
+                                                            shDir1 + slid*samplm_nr,
+                                                            &stepsB,
+                                                            currSline);
                 //if (tidx == 0) {
                 //        slineLenB[slineOff] = stepsB;
                 //}
@@ -1258,26 +1390,24 @@ __global__ void genStreamlinesMerge_k(const long long rndSeed,
 
                 int stepsF;
                 const int tissue_classF = tracker_d<BDIM_X,
-                                                    BDIM_Y,
-                                                    //HR_SIDE,
-                                                    DELTA_NR,
-                                                    SAMPLM_NR,
-                                                    N32DIMT>(&st,
-                                                             seed,
-                                                             first_step,
-                                                             MAKE_REAL3(1, 1, 1),
-                                                             dimx, dimy, dimz, dimt, dataf,
-                                                             b0s_mask,
-                                                             H, R,
-                                                             metric_map,
-                                                             delta_b, delta_q, //fit_matrix
-                                                             sampling_matrix,
-                                                             sphere_vertices,
-                                                             sphere_edges,
-                                                             num_edges,
-                                                             shDir1 + slid*SAMPLM_NR,
-                                                             &stepsF,
-                                                             currSline + stepsB-1);
+                                                    BDIM_Y>(&st,
+                                                            seed,
+                                                            first_step,
+                                                            MAKE_REAL3(1, 1, 1),
+                                                            dimx, dimy, dimz, dimt, dataf,
+                                                            b0s_mask,
+                                                            H, R,
+                                                            metric_map,
+							    delta_nr,
+                                                            delta_b, delta_q, //fit_matrix
+							    samplm_nr,
+                                                            sampling_matrix,
+                                                            sphere_vertices,
+                                                            sphere_edges,
+                                                            num_edges,
+                                                            shDir1 + slid*samplm_nr,
+                                                            &stepsF,
+                                                            currSline + stepsB-1);
                 if (tidx == 0) {
                         slineLen[slineOff] = stepsB-1+stepsF;
                 }
@@ -1306,14 +1436,15 @@ __global__ void genStreamlinesMerge_k(const long long rndSeed,
 void generate_streamlines_cuda_mgpu(const int nseeds, const std::vector<REAL*> &seeds_d,
                                     const int dimx, const int dimy, const int dimz, const int dimt,
                                     const std::vector<REAL*> &dataf_d, const std::vector<REAL*> &H_d, const std::vector<REAL*> &R_d,
+			            const int delta_nr,
                                     const std::vector<REAL*> &delta_b_d, const std::vector<REAL*> &delta_q_d,
                                     const std::vector<int*> &b0s_mask_d, const std::vector<REAL*> &metric_map_d,
+			            const int samplm_nr,
                                     const std::vector<REAL*> &sampling_matrix_d,
                                     const std::vector<REAL*> &sphere_vertices_d, const std::vector<int*> &sphere_edges_d, const int nedges,
                                     std::vector<REAL*> &slines_h, std::vector<int*> &slinesLen_h, std::vector<int> &nSlines_h,
                                     const std::vector<int> nSlines_old_h, const int rng_seed, const int rng_offset,
                                     const int ngpus, const std::vector<cudaStream_t> &streams) {
-
 
   int nseeds_per_gpu = (nseeds + ngpus - 1) / ngpus;
 
@@ -1329,9 +1460,20 @@ void generate_streamlines_cuda_mgpu(const int nseeds, const std::vector<REAL*> &
     dim3 grid(DIV_UP(nseeds_gpu, THR_X_BL/THR_X_SL));
 
     CHECK_CUDA(cudaMalloc(&slinesOffs_d[n], sizeof(*slinesOffs_d[n])*(nseeds_gpu+1)));
-    CHECK_CUDA(cudaMalloc(&shDirTemp0_d[n], sizeof(*shDirTemp0_d[n])*181*grid.x*block.y));
-    CHECK_CUDA(cudaMalloc(&shDirTemp1_d[n], sizeof(*shDirTemp1_d[n])*181*grid.x*block.y));
+    CHECK_CUDA(cudaMalloc(&shDirTemp0_d[n], sizeof(*shDirTemp0_d[n])*samplm_nr*grid.x*block.y));
+    CHECK_CUDA(cudaMalloc(&shDirTemp1_d[n], sizeof(*shDirTemp1_d[n])*samplm_nr*grid.x*block.y));
   }
+
+
+//  int delta_nr = 28;    // TO BE MADE PARAMETERS!
+//  int samplm_nr = 181;
+
+  int n32dimt = ((dimt+31)/32)*32;
+
+  size_t shSizeGNS = sizeof(REAL)*(THR_X_BL/THR_X_SL)*(2*n32dimt + 2*MAX(n32dimt, samplm_nr)) + // for get_direction_d
+		     sizeof(int)*samplm_nr;						        // for peak_directions_d	
+
+  //printf("shSizeGNS: %zu\n", shSizeGNS);
 
   //#pragma omp parallel for
   for (int n = 0; n < ngpus; ++n) {
@@ -1343,31 +1485,29 @@ void generate_streamlines_cuda_mgpu(const int nseeds, const std::vector<REAL*> &
 
     // Precompute number of streamlines before allocating memory
     getNumStreamlines_k<THR_X_SL,
-                        THR_X_BL/THR_X_SL,
-                        //55,  /* HR_SIDE */
-                        28,  /* DELTA_* NROWS */
-                        181, /* SAMPLING_MATRIX NROWS */
-                        128>  /* next multiple of 32 >= dimT */
-                        <<<grid, block>>>(rng_seed,
-                                          rng_offset + n*nseeds_per_gpu,
-                                          nseeds_gpu,
-                                          reinterpret_cast<const REAL3 *>(seeds_d[n]),
-                                          dimx,
-                                          dimy,
-                                          dimz,
-                                          dimt,
-                                          dataf_d[n],
-                                          H_d[n],
-                                          R_d[n],
-                                          delta_b_d[n],
-                                          delta_q_d[n],
-                                          b0s_mask_d[n],
-                                          sampling_matrix_d[n],
-                                          reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]),
-                                          reinterpret_cast<const int2 *>(sphere_edges_d[n]),
-                                          nedges,
-                                          shDirTemp0_d[n],
-                                          slinesOffs_d[n]);
+                        THR_X_BL/THR_X_SL>
+                        <<<grid, block, shSizeGNS>>>(rng_seed,
+						     rng_offset + n*nseeds_per_gpu,
+						     nseeds_gpu,
+						     reinterpret_cast<const REAL3 *>(seeds_d[n]),
+						     dimx,
+						     dimy,
+						     dimz,
+						     dimt,
+						     dataf_d[n],
+						     H_d[n],
+						     R_d[n],
+						     delta_nr,
+						     delta_b_d[n],
+						     delta_q_d[n],
+						     b0s_mask_d[n],
+						     samplm_nr,
+						     sampling_matrix_d[n],
+						     reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]),
+						     reinterpret_cast<const int2 *>(sphere_edges_d[n]),
+						     nedges,
+						     shDirTemp0_d[n],
+						     slinesOffs_d[n]);
   }
 
   std::vector<int> slinesOffs_h;
@@ -1450,36 +1590,34 @@ void generate_streamlines_cuda_mgpu(const int nseeds, const std::vector<REAL*> &
 #endif
     //fprintf(stderr, "Launching kernel with %u blocks of size (%u, %u)\n", grid.x, block.x, block.y);
     genStreamlinesMerge_k<THR_X_SL,
-                          THR_X_BL/THR_X_SL,
-                          //55,  /* HR_SIDE */
-                          28,  /* DELTA_* NROWS */
-                          181, /* SAMPLING_MATRIX NROWS */
-                          128>  /* next multiple of 32 >= dimT */
-                          <<<grid, block, 0, streams[n]>>>(rng_seed,
-                                            rng_offset + n*nseeds_per_gpu,
-                                            nseeds_gpu,
-                                            reinterpret_cast<const REAL3 *>(seeds_d[n]),
-                                            dimx,
-                                            dimy,
-                                            dimz,
-                                            dimt,
-                                            dataf_d[n],
-                                            H_d[n],
-                                            R_d[n],
-                                            delta_b_d[n],
-                                            delta_q_d[n],
-                                            b0s_mask_d[n],
-                                            metric_map_d[n],
-                                            sampling_matrix_d[n],
-                                            reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]),
-                                            reinterpret_cast<const int2 *>(sphere_edges_d[n]),
-                                            nedges,
-                                            slinesOffs_d[n],
-                                            shDirTemp0_d[n],
-                                            shDirTemp1_d[n],
-                                            slineSeed_d[n],
-                                            slineLen_d[n],
-                                            sline_d[n]);
+                          THR_X_BL/THR_X_SL>
+                          <<<grid, block, shSizeGNS, streams[n]>>>(rng_seed,
+								   rng_offset + n*nseeds_per_gpu,
+								   nseeds_gpu,
+								   reinterpret_cast<const REAL3 *>(seeds_d[n]),
+								   dimx,
+								   dimy,
+								   dimz,
+								   dimt,
+								   dataf_d[n],
+								   H_d[n],
+								   R_d[n],
+								   delta_nr,
+								   delta_b_d[n],
+								   delta_q_d[n],
+								   b0s_mask_d[n],
+								   metric_map_d[n],
+								   samplm_nr,
+								   sampling_matrix_d[n],
+								   reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]),
+								   reinterpret_cast<const int2 *>(sphere_edges_d[n]),
+								   nedges,
+								   slinesOffs_d[n],
+								   shDirTemp0_d[n],
+								   shDirTemp1_d[n],
+								   slineSeed_d[n],
+								   slineLen_d[n],
+								   sline_d[n]);
     CHECK_ERROR("genStreamlinesMerge_k");
   }
 

@@ -46,6 +46,9 @@ using np_array_bool = py::array_t<bool>;
 using np_array_int = py::array_t<int>;
 using np_array_short = py::array_t<short>;
 
+using np_array_cast = py::array_t<REAL, py::array::c_style | py::array::forcecast>;
+using np_array_short_cast = py::array_t<short, py::array::c_style | py::array::forcecast>;
+
 // Handle to cleanup returned host allocations when associated Python object is destroyed
 template <typename T>
 py::capsule cleanup(T* ptr) {
@@ -57,7 +60,7 @@ py::capsule cleanup(T* ptr) {
 
 class GPUTracker {
   public:
-    GPUTracker(np_array dataf,
+    GPUTracker(np_array_cast dataf,
                np_array H,
                np_array R,
                np_array delta_b,
@@ -89,13 +92,20 @@ class GPUTracker {
       dimt_ = dataf_info.shape[3];
       nedges_ = sphere_edges_info.shape[0];
 
+      delta_nr_ = delta_b_info.shape[0];
+      samplm_nr_ = sampling_matrix_info.shape[0];
+
+// No longer needed
+#if 0
       // Error checking for template parameters.
       // TODO: Need to make kernel more general.
       if (delta_b_info.shape[0] != 28 ||
           sampling_matrix_info.shape[0] != 181 ||
-          dataf_info.shape[3] > 128) {
+          dataf_info.shape[3] > 160) {
+          std::cout << delta_b_info.shape[0] << " " << sampling_matrix_info.shape[0] << " " << dataf_info.shape[3] << std::endl;
           throw std::invalid_argument("Input data dimensions not currently supported.");
       }
+#endif
 
       // Get number of GPUs
       int ngpus_avail;
@@ -202,7 +212,7 @@ class GPUTracker {
       // Call GPU routine
       generate_streamlines_cuda_mgpu(nseeds, seeds_d,
                                      dimx_, dimy_, dimz_, dimt_,
-                                     dataf_d, H_d, R_d, delta_b_d, delta_q_d, b0s_mask_d, metric_map_d, sampling_matrix_d,
+                                     dataf_d, H_d, R_d, delta_nr_, delta_b_d, delta_q_d, b0s_mask_d, metric_map_d, samplm_nr_, sampling_matrix_d,
                                      sphere_vertices_d, sphere_edges_d, nedges_,
                                      slines_, slinesLen_, nSlines, nSlines_old_, rng_seed_, rng_offset_, ngpus_,
                                      streams_);
@@ -258,6 +268,7 @@ class GPUTracker {
     int rng_offset_;
     int dimx_, dimy_, dimz_, dimt_;
     int nedges_;
+    int delta_nr_, samplm_nr_;
 
     std::vector<int> nSlines_old_;
     std::vector<REAL*> slines_;
@@ -281,7 +292,7 @@ class GPUTracker {
 
 PYBIND11_MODULE(cuslines, m) {
   py::class_<GPUTracker>(m, "GPUTracker")
-    .def(py::init<np_array, np_array,
+    .def(py::init<np_array_cast, np_array,
                   np_array, np_array,
                   np_array, np_array_int,
                   np_array, np_array,

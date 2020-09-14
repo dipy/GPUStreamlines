@@ -69,6 +69,10 @@ if [ -z $OUT_FILE ]; then
 	exit 1
 fi
 
+# necessary when running via docker to expand again
+# the parameter list turning spaces into separators
+set -- $*
+
 TRK_FILES=("$@")
 NTRKF=$(($#))
 
