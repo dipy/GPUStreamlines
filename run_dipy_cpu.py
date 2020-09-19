@@ -50,7 +50,7 @@ import nibabel as nib
 from nibabel.orientations import aff2axcodes
 
 # Import custom module
-import cuslines.cuslines as cuslines
+# import cuslines.cuslines as cuslines
 
 t0 = time.time()
 
@@ -74,7 +74,7 @@ parser.add_argument("nifti_file", help="path to the ep2multiband sequence nifti 
 parser.add_argument("bvals", help="path to the bvals")
 parser.add_argument("bvecs", help="path to the bvecs")
 parser.add_argument("mask_nifti", help="path to the mask file")
-parser.add_argument("roi_nifti", help="path to the ROI file")
+parser.add_argument("--roi_nifti", type=str, default='', help="path to the ROI file")
 parser.add_argument("--output-prefix", type=str, default ='', help="path to the output file")
 parser.add_argument("--chunk-size", type=int, required=True, help="how many seeds to process per sweep, per GPU")
 args = parser.parse_args()
@@ -82,10 +82,14 @@ args = parser.parse_args()
 img = get_img(args.nifti_file)
 voxel_order = "".join(aff2axcodes(img.affine))
 gtab = get_gtab(args.bvals, args.bvecs)
-roi = get_img(args.roi_nifti)
+
+if len(args.roi_nifti):
+    roi = get_img(args.roi_nifti)
+else:
+    roi = None
+
 mask = get_img(args.mask_nifti)
 data = img.get_data()
-roi_data = roi.get_data()
 mask = mask.get_data()
 
 tenmodel = dti.TensorModel(gtab, fit_method='WLS')
@@ -100,6 +104,14 @@ tissue_classifier = ThresholdStoppingCriterion(FA, 0.1)
 metric_map = np.asarray(FA, 'float64')
 
 # Create seeds for ROI
+if roi is not None:
+    roi_data = roi.get_data()
+else:
+    # Create seeds based on the same FA criterion
+    # used for stopping
+    roi_data = np.zeros(data.shape[:3])
+    roi_data[FA>0.1] = 1
+
 seed_mask = utils.seeds_from_mask(roi_data, density=3, affine=np.eye(4))
 
 # Setup model
