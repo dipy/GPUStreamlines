@@ -8,7 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt update && \
     apt install --assume-yes apt-transport-https \
     	ca-certificates gnupg \
-	software-properties-common gcc git wget
+	software-properties-common gcc git wget numactl
 RUN wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null \
     	      | gpg --dearmor - | tee /etc/apt/trusted.gpg.d/kitware.gpg >/dev/null
 RUN apt-add-repository "deb https://apt.kitware.com/ubuntu/ focal main"
@@ -23,7 +23,7 @@ ENV PATH /opt/anaconda/bin:${PATH}
 ENV LD_LIBRARY_PATH /opt/anaconda/lib:${LD_LIBRARY_PATH}
 
 # python prereqs
-RUN pip install numpy scipy cython nibabel dipy
+RUN pip install numpy scipy cython nibabel dipy tqdm
 
 # copy stuff
 COPY CMakeLists.txt /opt/GPUStreamlines/CMakeLists.txt

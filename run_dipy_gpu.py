@@ -27,9 +27,11 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import os
 import argparse
 import random
 import time
+from tqdm import trange, tqdm
 
 import numpy as np
 
@@ -73,35 +75,66 @@ parser.add_argument("nifti_file", help="path to the ep2multiband sequence nifti 
 parser.add_argument("bvals", help="path to the bvals")
 parser.add_argument("bvecs", help="path to the bvecs")
 parser.add_argument("mask_nifti", help="path to the mask file")
-parser.add_argument("roi_nifti", help="path to the ROI file")
+parser.add_argument("--fa_numpy", default=None, help="path to the FA numpy file")
+parser.add_argument("--roi_nifti", default=None, help="path to the ROI file")
 parser.add_argument("--output-prefix", type=str, default ='', help="path to the output file")
 parser.add_argument("--chunk-size", type=int, required=True, help="how many seeds to process per sweep, per GPU")
+parser.add_argument("--sampling-density", type=int, default=3, help="sampling density for seed generation")
 parser.add_argument("--ngpus", type=int, required=True, help="number of GPUs to use")
 parser.add_argument("--use-fast-write", action='store_true', help="use fast file write")
+parser.add_argument("--max-angle", type=float, default=1.0471975511965976, help="default: 60 deg (in rad)")
+parser.add_argument("--min-signal", type=float, default=1.0, help="default: 1.0")
+parser.add_argument("--tc-threshold", type=float, default=0.1, help="default: 0.1")
+parser.add_argument("--step-size", type=float, default=0.5, help="default: 0.5")
 args = parser.parse_args()
 
 img = get_img(args.nifti_file)
 voxel_order = "".join(aff2axcodes(img.affine))
 gtab = get_gtab(args.bvals, args.bvecs)
-roi = get_img(args.roi_nifti)
 mask = get_img(args.mask_nifti)
-data = img.get_data()
-roi_data = roi.get_data()
-mask = mask.get_data()
+data = img.get_fdata()
 
-tenmodel = dti.TensorModel(gtab, fit_method='WLS')
-print('Fitting Tensor')
-tenfit = tenmodel.fit(data, mask)
-print('Computing anisotropy measures (FA,MD,RGB)')
-FA = tenfit.fa
-FA[np.isnan(FA)] = 0
+# resample mask if necessary
+if mask.shape != data.shape:
+    from dipy.align.imaffine import AffineMap
+    identity = np.eye(4)
+    affine_map = AffineMap(identity,
+                           img.shape[:3], img.affine,
+                           mask.shape[:3], mask.affine)
+    mask = affine_map.transform(mask.get_fdata())
+    #mask = np.round(mask)
+else:
+    mask = mask.get_fdata()
+
+# load or compute and save FA file
+if (args.fa_numpy is not None) and os.path.isfile(args.fa_numpy):
+    FA = np.load(args.fa_numpy, allow_pickle=True)
+else:
+    # Fit
+    tenmodel = dti.TensorModel(gtab, fit_method='WLS')
+    print('Fitting Tensor')
+    tenfit = tenmodel.fit(data, mask)
+    print('Computing anisotropy measures (FA,MD,RGB)')
+    FA = tenfit.fa
+    FA[np.isnan(FA)] = 0
+
+    if args.fa_numpy is not None:
+        np.save(args.fa_numpy, FA)
 
 # Setup tissue_classifier args
 #tissue_classifier = ThresholdTissueClassifier(FA, 0.1)
 metric_map = np.asarray(FA, 'float64')
 
+# resample roi if necessary
+if args.roi_nifti is not None:
+    roi = get_img(args.roi_nifti)
+    roi_data = roi.get_fdata()
+else:
+    roi_data = np.zeros(data.shape[:3])
+    roi_data[ FA > 0.1 ] = 1.
+
 # Create seeds for ROI
-seed_mask = utils.seeds_from_mask(roi_data, density=3, affine=np.eye(4))
+seed_mask = utils.seeds_from_mask(roi_data, density=args.sampling_density, affine=np.eye(4))
 
 # Setup model
 print('slowadcodf')
@@ -141,41 +174,50 @@ global_chunk_size = args.chunk_size * args.ngpus
 nchunks = (seed_mask.shape[0] + global_chunk_size - 1) // global_chunk_size
 
 #streamline_generator = LocalTracking(boot_dg, tissue_classifier, seed_mask, affine=np.eye(4), step_size=.5)
-gpu_tracker = cuslines.GPUTracker(dataf, H, R, delta_b, delta_q,
+gpu_tracker = cuslines.GPUTracker(args.max_angle,
+                                  args.min_signal,
+                                  args.tc_threshold,
+                                  args.step_size,
+                                  dataf, H, R, delta_b, delta_q,
                                   b0s_mask.astype(np.int32), metric_map, sampling_matrix,
                                   sphere.vertices, sphere.edges.astype(np.int32),
                                   ngpus=args.ngpus, rng_seed=0)
 t1 = time.time()
 streamline_time = 0
 io_time = 0
-for idx in range(int(nchunks)):
-  # Main streamline computation
-  ts = time.time()
-  streamlines = gpu_tracker.generate_streamlines(seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size])
-  te = time.time()
-  streamline_time += (te-ts)
-  print("Generated {} streamlines from {} seeds, time: {} s".format(len(streamlines),
-                                                                    seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size].shape[0],
-                                                                    te-ts))
 
-  # Save tracklines file
-  if args.output_prefix:
-    if args.use_fast_write:
-      prefix = "{}.{}_{}".format(args.output_prefix, idx+1, nchunks)
-      ts = time.time()
-      gpu_tracker.dump_streamlines(prefix, voxel_order, roi.shape, roi.header.get_zooms(), img.affine)
-      te = time.time()
-      print("Saved streamlines to {}_*.trk, time {} s".format(prefix, te-ts))
-    else:
-      fname = "{}.{}_{}.trk".format(args.output_prefix, idx+1, nchunks)
-      ts = time.time()
-      #save_tractogram(fname, streamlines, img.affine, vox_size=roi.header.get_zooms(), shape=roi_data.shape)
-      sft = StatefulTractogram(streamlines, args.nifti_file, Space.VOX)
-      save_tractogram(sft, fname)
-      te = time.time()
-      print("Saved streamlines to {}, time {} s".format(fname, te-ts))
-    io_time += (te-ts)
+# debug start val to fast forward
+with tqdm(total=seed_mask.shape[0]) as pbar:
+    for idx in range(int(nchunks)):
+        # Main streamline computation
+        ts = time.time()
+        streamlines = gpu_tracker.generate_streamlines(seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size])
+        te = time.time()
+        streamline_time += (te-ts)
+        pbar.update(seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size].shape[0])
+        #print("Generated {} streamlines from {} seeds, time: {} s".format(len(streamlines),
+        #                                                                  seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size].shape[0],
+        #                                                                  te-ts))
 
+        # Save tracklines file
+        if args.output_prefix:
+            if args.use_fast_write:
+                prefix = "{}.{}_{}".format(args.output_prefix, idx+1, nchunks)
+                ts = time.time()
+                gpu_tracker.dump_streamlines(prefix, voxel_order, roi_data.shape, img.header.get_zooms(), img.affine)
+                te = time.time()
+                print("Saved streamlines to {}_*.trk, time {} s".format(prefix, te-ts))
+            else:
+                fname = "{}.{}_{}.trk".format(args.output_prefix, idx+1, nchunks)
+                ts = time.time()
+                #save_tractogram(fname, streamlines, img.affine, vox_size=roi.header.get_zooms(), shape=roi_data.shape)
+                sft = StatefulTractogram(streamlines, args.nifti_file, Space.VOX)
+                save_tractogram(sft, fname)
+                te = time.time()
+                print("Saved streamlines to {}, time {} s".format(fname, te-ts))
+            io_time += (te-ts)
+
+pbar.close()
 t2 = time.time()
 
 print("Completed processing {} seeds.".format(seed_mask.shape[0]))

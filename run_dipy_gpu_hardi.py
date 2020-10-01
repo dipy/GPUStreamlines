@@ -76,10 +76,17 @@ parser.add_argument("--chunk-size", type=int, required=True, help="how many seed
 parser.add_argument("--nseeds", type=int, default=None, help="how many seeds to process in total")
 parser.add_argument("--ngpus", type=int, required=True, help="number of GPUs to use")
 parser.add_argument("--use-fast-write", action='store_true', help="use fast file write")
+parser.add_argument("--max-angle", type=float, default=1.0471975511965976, help="default: 60 deg (in rad)")
+parser.add_argument("--min-signal", type=float, default=1.0, help="default: 1.0")
+parser.add_argument("--tc-threshold", type=float, default=0.1, help="default: 0.1")
+parser.add_argument("--step-size", type=float, default=0.5, help="default: 0.5")
 args = parser.parse_args()
 
 # Get Stanford HARDI data
 hardi_nifti_fname, hardi_bval_fname, hardi_bvec_fname = get_fnames('stanford_hardi')
+
+print(hardi_nifti_fname, hardi_bval_fname, hardi_bvec_fname)
+
 csf, gm, wm = read_stanford_pve_maps()
 wm_data = wm.get_fdata()
 
@@ -146,7 +153,12 @@ global_chunk_size = args.chunk_size * args.ngpus
 nchunks = (seed_mask.shape[0] + global_chunk_size - 1) // global_chunk_size
 
 #streamline_generator = LocalTracking(boot_dg, tissue_classifier, seed_mask, affine=np.eye(4), step_size=.5)
-gpu_tracker = cuslines.GPUTracker(dataf, H, R, delta_b, delta_q,
+
+gpu_tracker = cuslines.GPUTracker(args.max_angle,
+                                  args.min_signal,
+                                  args.tc_threshold,
+                                  args.step_size,
+                                  dataf, H, R, delta_b, delta_q,
                                   b0s_mask.astype(np.int32), metric_map, sampling_matrix,
                                   sphere.vertices, sphere.edges.astype(np.int32),
                                   ngpus=args.ngpus, rng_seed=0)

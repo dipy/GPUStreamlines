@@ -92,7 +92,7 @@ __device__ int trilinear_interp_d(const int dimx,
                 return -1;
         }
 
-        int  coo[3][2];
+        long long  coo[3][2];
         REAL wgh[3][2]; // could use just one...
 
         const REAL_T ONE  = static_cast<REAL_T>(1.0);
@@ -647,7 +647,8 @@ template<int BDIM_X,
          int BDIM_Y,
          typename REAL_T,
          typename REAL3_T>
-__device__ int closest_peak_d(const REAL3_T  direction, //dir
+__device__ int closest_peak_d(const REAL_T max_angle,
+			      const REAL3_T  direction, //dir
                               const int npeaks,
                               const REAL3_T *__restrict__ peaks,
                                     REAL3_T *__restrict__ peak) {// dirs,
@@ -657,7 +658,8 @@ __device__ int closest_peak_d(const REAL3_T  direction, //dir
         const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
         const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
 
-        const REAL_T cos_similarity = COS(MAX_ANGLE_P);
+        //const REAL_T cos_similarity = COS(MAX_ANGLE_P);
+        const REAL_T cos_similarity = COS(max_angle);
 #if 0
         if (!threadIdx.y && !tidx) {
                 printf("direction: (%f, %f, %f)\n",
@@ -804,7 +806,9 @@ template<int BDIM_X,
          typename REAL_T,
          typename REAL3_T>
 __device__ int get_direction_d(curandStatePhilox4_32_10_t *st,
-                               REAL3_T dir,
+                               const REAL_T max_angle,
+			       const REAL_T min_signal,
+			       REAL3_T dir,
                                const int dimx,
                                const int dimy,
                                const int dimz,
@@ -919,7 +923,8 @@ __device__ int get_direction_d(curandStatePhilox4_32_10_t *st,
 			//__syncwarp();
 
 			for(int j = tidx; j < dimt; j += BDIM_X) {
-				__vox_data_sh[j] = MAX(MIN_SIGNAL_P, __vox_data_sh[j]);
+				//__vox_data_sh[j] = MAX(MIN_SIGNAL_P, __vox_data_sh[j]);
+				__vox_data_sh[j] = MAX(min_signal, __vox_data_sh[j]);
 			}
 			__syncwarp(WMASK);
 
@@ -1021,7 +1026,7 @@ __device__ int get_direction_d(curandStatePhilox4_32_10_t *st,
                                 }
                                 */
                                 REAL3_T peak;
-                                const int foundPeak = closest_peak_d<BDIM_X, BDIM_Y, REAL_T, REAL3_T>(dir, ndir, dirs, &peak);
+                                const int foundPeak = closest_peak_d<BDIM_X, BDIM_Y, REAL_T, REAL3_T>(max_angle, dir, ndir, dirs, &peak);
                                 __syncwarp(WMASK);
                                 if (foundPeak) {
                                         if (tidx == 0) {
@@ -1041,7 +1046,8 @@ template<int BDIM_X,
          int BDIM_Y,
          typename REAL_T,
          typename REAL3_T>
-__device__ int check_point_d(const REAL3_T point,
+__device__ int check_point_d(const REAL_T tc_threshold,
+			     const REAL3_T point,
                              const int dimx,
                              const int dimy,
                              const int dimz,
@@ -1064,7 +1070,8 @@ __device__ int check_point_d(const REAL3_T point,
         if (rv != 0) {
                 return OUTSIDEIMAGE;
         }
-        return (__shInterpOut[tidy] > TC_THRESHOLD_P) ? TRACKPOINT : ENDPOINT;
+        //return (__shInterpOut[tidy] > TC_THRESHOLD_P) ? TRACKPOINT : ENDPOINT;
+        return (__shInterpOut[tidy] > tc_threshold) ? TRACKPOINT : ENDPOINT;
 }
 
 template<int BDIM_X,
@@ -1072,6 +1079,10 @@ template<int BDIM_X,
          typename REAL_T,
          typename REAL3_T>
 __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
+			 const REAL_T max_angle,
+			 const REAL_T min_signal,
+			 const REAL_T tc_threshold,
+			 const REAL_T step_size,
                          REAL3_T seed,
                          REAL3_T first_step,
                          REAL3_T voxel_size,
@@ -1088,7 +1099,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                          // max_angle, pmf_threshold from global defines
                          // b0s_mask already passed
                          // min_signal from global defines
-                         // tc_threashold from global defines
+                         // tc_threshold from global defines
                          // pmf_threashold from global defines
                          const REAL_T *__restrict__ metric_map,
 			 const int delta_nr,
@@ -1131,6 +1142,8 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                 int ndir = get_direction_d<BDIM_X,
                                            BDIM_Y,
                                            5>(st,
+					      max_angle,
+					      min_signal,
                                               direction,
                                               dimx, dimy, dimz, dimt, dataf,
                                               b0s_mask /* !dwi_mask */,
@@ -1161,9 +1174,12 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                 }
                 //return;
 #endif
-                point.x += (direction.x / voxel_size.x) * STEP_SIZE_P;
-                point.y += (direction.y / voxel_size.y) * STEP_SIZE_P;
-                point.z += (direction.z / voxel_size.z) * STEP_SIZE_P;
+                //point.x += (direction.x / voxel_size.x) * STEP_SIZE_P;
+                //point.y += (direction.y / voxel_size.y) * STEP_SIZE_P;
+                //point.z += (direction.z / voxel_size.z) * STEP_SIZE_P;
+                point.x += (direction.x / voxel_size.x) * step_size;
+                point.y += (direction.y / voxel_size.y) * step_size;
+                point.z += (direction.z / voxel_size.z) * step_size;
 
                 if (tidx == 0) {
                         streamline[i] = point;
@@ -1175,7 +1191,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                 }
                 __syncwarp(WMASK);
 
-                tissue_class = check_point_d<BDIM_X, BDIM_Y>(point, dimx, dimy, dimz, metric_map); 
+                tissue_class = check_point_d<BDIM_X, BDIM_Y>(tc_threshold, point, dimx, dimy, dimz, metric_map);
 
                 if (tissue_class == ENDPOINT ||
                     tissue_class == INVALIDPOINT ||
@@ -1192,7 +1208,9 @@ template<int BDIM_X,
          int BDIM_Y,
          typename REAL_T,
          typename REAL3_T>
-__global__ void getNumStreamlines_k(const long long rndSeed,
+__global__ void getNumStreamlines_k(const REAL_T max_angle,
+				    const REAL_T min_signal,
+				    const long long rndSeed,
                                     const int rndOffset,
                                     const int nseed,
                                     const REAL3_T *__restrict__ seeds,
@@ -1244,6 +1262,8 @@ __global__ void getNumStreamlines_k(const long long rndSeed,
         int ndir = get_direction_d<BDIM_X,
                                    BDIM_Y,
                                    1>(&st,
+				      max_angle,
+				      min_signal,
                                       MAKE_REAL3(0,0,0),
                                       dimx, dimy, dimz, dimt, dataf,
                                       b0s_mask /* !dwi_mask */,
@@ -1280,7 +1300,11 @@ template<int BDIM_X,
          int BDIM_Y,
          typename REAL_T,
          typename REAL3_T>
-__global__ void genStreamlinesMerge_k(const long long rndSeed,
+__global__ void genStreamlinesMerge_k(const REAL_T max_angle,
+				      const REAL_T min_signal,
+				      const REAL_T tc_threshold,
+				      const REAL_T step_size,
+				      const long long rndSeed,
                                       const int rndOffset,
                                       const int nseed,
                                       const REAL3_T *__restrict__ seeds,
@@ -1358,6 +1382,10 @@ __global__ void genStreamlinesMerge_k(const long long rndSeed,
                 int stepsB;
                 const int tissue_classB = tracker_d<BDIM_X,
                                                     BDIM_Y>(&st,
+						            max_angle,
+						            min_signal,
+							    tc_threshold,
+							    step_size,
                                                             seed,
                                                             MAKE_REAL3(-first_step.x, -first_step.y, -first_step.z),
                                                             MAKE_REAL3(1, 1, 1),
@@ -1391,6 +1419,10 @@ __global__ void genStreamlinesMerge_k(const long long rndSeed,
                 int stepsF;
                 const int tissue_classF = tracker_d<BDIM_X,
                                                     BDIM_Y>(&st,
+						            max_angle,
+						            min_signal,
+							    tc_threshold,
+							    step_size,
                                                             seed,
                                                             first_step,
                                                             MAKE_REAL3(1, 1, 1),
@@ -1433,7 +1465,8 @@ __global__ void genStreamlinesMerge_k(const long long rndSeed,
         return;
 }
 
-void generate_streamlines_cuda_mgpu(const int nseeds, const std::vector<REAL*> &seeds_d,
+void generate_streamlines_cuda_mgpu(const REAL max_angle, const REAL min_signal, const REAL tc_threshold, const REAL step_size,
+                                    const int nseeds, const std::vector<REAL*> &seeds_d,
                                     const int dimx, const int dimy, const int dimz, const int dimt,
                                     const std::vector<REAL*> &dataf_d, const std::vector<REAL*> &H_d, const std::vector<REAL*> &R_d,
 			            const int delta_nr,
@@ -1464,10 +1497,6 @@ void generate_streamlines_cuda_mgpu(const int nseeds, const std::vector<REAL*> &
     CHECK_CUDA(cudaMalloc(&shDirTemp1_d[n], sizeof(*shDirTemp1_d[n])*samplm_nr*grid.x*block.y));
   }
 
-
-//  int delta_nr = 28;    // TO BE MADE PARAMETERS!
-//  int samplm_nr = 181;
-
   int n32dimt = ((dimt+31)/32)*32;
 
   size_t shSizeGNS = sizeof(REAL)*(THR_X_BL/THR_X_SL)*(2*n32dimt + 2*MAX(n32dimt, samplm_nr)) + // for get_direction_d
@@ -1486,7 +1515,9 @@ void generate_streamlines_cuda_mgpu(const int nseeds, const std::vector<REAL*> &
     // Precompute number of streamlines before allocating memory
     getNumStreamlines_k<THR_X_SL,
                         THR_X_BL/THR_X_SL>
-                        <<<grid, block, shSizeGNS>>>(rng_seed,
+                        <<<grid, block, shSizeGNS>>>(max_angle,
+						     min_signal,
+						     rng_seed,
 						     rng_offset + n*nseeds_per_gpu,
 						     nseeds_gpu,
 						     reinterpret_cast<const REAL3 *>(seeds_d[n]),
@@ -1591,7 +1622,11 @@ void generate_streamlines_cuda_mgpu(const int nseeds, const std::vector<REAL*> &
     //fprintf(stderr, "Launching kernel with %u blocks of size (%u, %u)\n", grid.x, block.x, block.y);
     genStreamlinesMerge_k<THR_X_SL,
                           THR_X_BL/THR_X_SL>
-                          <<<grid, block, shSizeGNS, streams[n]>>>(rng_seed,
+                          <<<grid, block, shSizeGNS, streams[n]>>>(max_angle,
+								   min_signal,
+								   tc_threshold,
+								   step_size,
+								   rng_seed,
 								   rng_offset + n*nseeds_per_gpu,
 								   nseeds_gpu,
 								   reinterpret_cast<const REAL3 *>(seeds_d[n]),

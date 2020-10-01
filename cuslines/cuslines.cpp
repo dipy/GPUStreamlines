@@ -60,7 +60,11 @@ py::capsule cleanup(T* ptr) {
 
 class GPUTracker {
   public:
-    GPUTracker(np_array_cast dataf,
+    GPUTracker(double max_angle,
+               double min_signal,
+               double tc_threshold,
+               double step_size,
+               np_array_cast dataf,
                np_array H,
                np_array R,
                np_array delta_b,
@@ -117,6 +121,11 @@ class GPUTracker {
       std::cerr << "Creating GPUTracker with " << ngpus << " GPUs..." << std::endl;
       ngpus_ = ngpus;
 
+      max_angle_ = max_angle;
+      min_signal_ = min_signal;
+      tc_threshold_ = tc_threshold;
+      step_size_ = step_size;
+
       // Allocate/copy constant problem data on GPUs
       dataf_d.resize(ngpus_, nullptr);
       H_d.resize(ngpus_, nullptr);
@@ -132,7 +141,8 @@ class GPUTracker {
       //#pragma omp parallel for
       for (int n = 0; n < ngpus_; ++n) {
         CHECK_CUDA(cudaSetDevice(n));
-        CHECK_CUDA(cudaMalloc(&dataf_d[n], sizeof(*dataf_d[n]) * dataf_info.size));
+        CHECK_CUDA(cudaMallocManaged(&dataf_d[n], sizeof(*dataf_d[n]) * dataf_info.size));
+        CHECK_CUDA(cudaMemAdvise(dataf_d[n], sizeof(*dataf_d[n]) * dataf_info.size, cudaMemAdviseSetPreferredLocation, n));
         CHECK_CUDA(cudaMalloc(&H_d[n], sizeof(*H_d[n]) * H_info.size));
         CHECK_CUDA(cudaMalloc(&R_d[n], sizeof(*R_d[n]) * R_info.size));
         CHECK_CUDA(cudaMalloc(&delta_b_d[n], sizeof(*delta_b_d[n]) * delta_b_info.size));
@@ -210,7 +220,8 @@ class GPUTracker {
       std::vector<int> nSlines(ngpus_);
 
       // Call GPU routine
-      generate_streamlines_cuda_mgpu(nseeds, seeds_d,
+      generate_streamlines_cuda_mgpu(max_angle_, min_signal_, tc_threshold_, step_size_,
+                                     nseeds, seeds_d,
                                      dimx_, dimy_, dimz_, dimt_,
                                      dataf_d, H_d, R_d, delta_nr_, delta_b_d, delta_q_d, b0s_mask_d, metric_map_d, samplm_nr_, sampling_matrix_d,
                                      sphere_vertices_d, sphere_edges_d, nedges_,
@@ -270,6 +281,11 @@ class GPUTracker {
     int nedges_;
     int delta_nr_, samplm_nr_;
 
+    double max_angle_;
+    double tc_threshold_;
+    double min_signal_;
+    double step_size_;
+
     std::vector<int> nSlines_old_;
     std::vector<REAL*> slines_;
     std::vector<int*> slinesLen_;
@@ -292,12 +308,14 @@ class GPUTracker {
 
 PYBIND11_MODULE(cuslines, m) {
   py::class_<GPUTracker>(m, "GPUTracker")
-    .def(py::init<np_array_cast, np_array,
+    .def(py::init<double, double, double, double,
+		  np_array_cast, np_array,
                   np_array, np_array,
                   np_array, np_array_int,
                   np_array, np_array,
                   np_array, np_array_int,
                   int, int, int>(),
+                  py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(),
                   py::arg().noconvert(), py::arg().noconvert(),
                   py::arg().noconvert(), py::arg().noconvert(),
                   py::arg().noconvert(), py::arg().noconvert(),

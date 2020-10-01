@@ -69,10 +69,11 @@
 
 #define MAX_SLINE_LEN	(501)
 #define PMF_THRESHOLD_P	((REAL)0.1)
-#define TC_THRESHOLD_P	((REAL)0.1)
-#define STEP_SIZE_P	((REAL)0.5)
-#define MAX_ANGLE_P	((REAL)1.0471975511965976) // 60 deg in radians
-#define MIN_SIGNAL_P	((REAL)1.0)
+
+//#define TC_THRESHOLD_P	((REAL)0.1)
+//#define STEP_SIZE_P	((REAL)0.5)  // only for TRK generation
+//#define MAX_ANGLE_P	((REAL)1.0471975511965976) // 60 deg in radians
+//#define MIN_SIGNAL_P	((REAL)1.0)
 
 #define MAX_SLINES_PER_SEED (10)
 
