@@ -1,7 +1,9 @@
 # GPUStreamlines
 
 ## Installation
-To install, simply run `./build_cuslines.sh`. This will place the cuslines library and files within a new subdirectory `./install` as well as copy the example script.
+To install, simply run `./build_cuslines.sh`. This will place the cuslines library and files within a new subdirectory `./install` as well as copy the example script. 
+
+By default, the build supports compute capability 7.0 and 8.0. If a different compute capability is needed, the `./build_cuslines.sh` script should define `CUDA_COMPUTE_CAPABILITY` (e.g. `-DCUDA_COMPUTE_CAPABILITY=61` for compute capability 6.1) in the call to cmake.
 
 ## Running the examples
 First, navigate into the `./builds` subdirectory. There are two example scripts using the HARDI dataset, `run_dipy_cpu_hardi.py` and `run_dipy_gpu_hardi.py`, which run on CPU and GPU respectively.
