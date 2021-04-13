@@ -33,7 +33,7 @@ jobs:
       uses: docker/login-action@v1
       with:
         registry: ghcr.io
-        username: arokem
+        username: dipy
         password: ${{secrets.CR_PAT}}
 
     - name: Build and push docker image
