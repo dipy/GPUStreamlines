@@ -1,0 +1,42 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches:
+      - 'master'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-18.04
+    steps:
+    - name: Maximize build space
+      uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 32768
+        remove-dotnet: 'true'
+        remove-android: 'true'
+        remove-haskell: 'true'
+
+    - name: Checkout repo
+      uses: actions/checkout@v2
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v1
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v1
+
+    - name: Login to GHCR
+      uses: docker/login-action@v1
+      with:
+        registry: ghcr.io
+        username: dipy
+        password: ${{secrets.CR_PAT}}
+
+    - name: Build and push docker image
+      run: sh ./Docker/dockerbuild.sh \
+        "${{github.sha}}" \
+        "dipy"
