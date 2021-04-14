@@ -24,7 +24,6 @@ ENV LD_LIBRARY_PATH /opt/anaconda/lib:${LD_LIBRARY_PATH}
 
 # python prereqs
 RUN pip install numpy scipy cython nibabel dipy tqdm
-RUN conda install -c conda-forge pybind11
 
 # copy stuff
 COPY CMakeLists.txt /opt/GPUStreamlines/CMakeLists.txt
