@@ -37,6 +37,6 @@ jobs:
         password: ${{secrets.CR_PAT}}
 
     - name: Build and push docker image
-      run: sh ./docker/dockerbuild.sh \
+      run: sh ./dockerbuild.sh \
         "${{github.sha}}" \
         "dipy"
