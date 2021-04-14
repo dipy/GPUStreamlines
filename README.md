@@ -104,23 +104,17 @@ Destroy GPUTracker...
 
 ## Running on AWS with Docker
 First, set up an AWS instance with GPU and ssh into it (we recommend a P3 instance with at least 1 V100 16 GB GPU and a Deep Learning AMI Ubuntu 18.04 v 33.0.). Then do the following:
-1. Log in to GitHub docker registry:
+1. Pull the container:
 ```
-$ docker login -u <github id> docker.pkg.github.com
-```
-2. Enter your GitHub access token. If you do not have one, create it on the GitHub general security settings page and enable package read access for that token.
-3. Pull the container:
-```
-$ docker pull docker.pkg.github.com/dipy/gpustreamlines/gpustreamlines:latest
+$ docker pull docker pull ghcr.io/dipy/gpustreamlines:latest
 ```
 4. Run the code, mounting the current directory into the container for easy result retrieval:
 ```
-$ docker run --gpus=all -v ${PWD}:/opt/exec/output:rw -it docker.pkg.github.com/dipy/gpustreamlines/gpustreamlines:latest \
+$ docker run --gpus=all -v ${PWD}:/opt/exec/output:rw -it ghcr.io/dipy/gpustreamlines:latest \
  python run_dipy_gpu_hardi.py --chunk-size 100000 --ngpus 1 --output-prefix output/hardi_gpu_full --use-fast-write
 ```
 5. The code produces a number of independent track files (one per processed "chunk"), but we have provided a merge script to combine them into a single trk file. To merge files, run:
 ```
-$ docker run --gpus=all -v ${PWD}:/opt/exec/output:rw -it docker.pkg.github.com/dipy/gpustreamlines/gpustreamlines:latest \
+$ docker run --gpus=all -v ${PWD}:/opt/exec/output:rw -it ghcr.io/dipy/gpustreamlines:latest \
  ./merge_trk.sh -o output/hardi_tracks.trk output/hardi_gpu_full*
 ```
-

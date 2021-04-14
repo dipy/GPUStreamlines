@@ -31,23 +31,19 @@ import os
 import argparse
 import random
 import time
-from tqdm import trange, tqdm
+from tqdm import tqdm
 
 import numpy as np
 
 import dipy.reconst.dti as dti
-from dipy.io import read_bvals_bvecs
-from dipy.io.stateful_tractogram import Origin, Space, StatefulTractogram
+from dipy.io.image import load_nifti
+from dipy.io.stateful_tractogram import Space, StatefulTractogram
 from dipy.io.streamline import save_tractogram
 from dipy.tracking import utils
 from dipy.core.gradients import gradient_table
 from dipy.data import small_sphere
-#from dipy.direction import BootDirectionGetter
 from dipy.reconst.shm import OpdtModel
-#from dipy.tracking.local import LocalTracking, ThresholdTissueClassifier
 from dipy.reconst import shm
-
-import nibabel as nib
 from nibabel.orientations import aff2axcodes
 
 # Import custom module
@@ -59,39 +55,40 @@ t0 = time.time()
 np.random.seed(0)
 random.seed(0)
 
-#Get Gradient values
-def get_gtab(fbval, fbvec):
-    bvals, bvecs = read_bvals_bvecs(fbval, fbvec)
-    gtab = gradient_table(bvals, bvecs)
-    return gtab
-
-def get_img(ep2_seq):
-    img = nib.load(ep2_seq)
-    return img
 
 print("parsing arguments")
 parser = argparse.ArgumentParser()
-parser.add_argument("nifti_file", help="path to the ep2multiband sequence nifti file")
+parser.add_argument("nifti_file", help="path to the dwi nifti file")
 parser.add_argument("bvals", help="path to the bvals")
 parser.add_argument("bvecs", help="path to the bvecs")
 parser.add_argument("mask_nifti", help="path to the mask file")
-parser.add_argument("--fa_numpy", default=None, help="path to the FA numpy file")
+parser.add_argument("--fa_file", default=None,
+                    help="path to the FA file (nifti or numpy")
 parser.add_argument("--roi_nifti", default=None, help="path to the ROI file")
-parser.add_argument("--output-prefix", type=str, default ='', help="path to the output file")
-parser.add_argument("--chunk-size", type=int, required=True, help="how many seeds to process per sweep, per GPU")
-parser.add_argument("--sampling-density", type=int, default=3, help="sampling density for seed generation")
-parser.add_argument("--ngpus", type=int, required=True, help="number of GPUs to use")
-parser.add_argument("--use-fast-write", action='store_true', help="use fast file write")
-parser.add_argument("--max-angle", type=float, default=1.0471975511965976, help="default: 60 deg (in rad)")
-parser.add_argument("--min-signal", type=float, default=1.0, help="default: 1.0")
-parser.add_argument("--tc-threshold", type=float, default=0.1, help="default: 0.1")
-parser.add_argument("--step-size", type=float, default=0.5, help="default: 0.5")
+parser.add_argument("--output-prefix", type=str, default='',
+                    help="path to the output file")
+parser.add_argument("--chunk-size", type=int, required=True,
+                    help="how many seeds to process per sweep, per GPU")
+parser.add_argument("--sampling-density", type=int, default=3,
+                    help="sampling density for seed generation")
+parser.add_argument("--ngpus", type=int, required=True,
+                    help="number of GPUs to use")
+parser.add_argument("--use-fast-write", action='store_true',
+                    help="use fast file write")
+parser.add_argument("--max-angle", type=float, default=1.0471975511965976,
+                    help="default: 60 deg (in rad)")
+parser.add_argument("--min-signal", type=float, default=1.0,
+                    help="default: 1.0")
+parser.add_argument("--tc-threshold", type=float, default=0.1,
+                    help="default: 0.1")
+parser.add_argument("--step-size", type=float, default=0.5,
+                    help="default: 0.5")
 args = parser.parse_args()
 
-img = get_img(args.nifti_file)
+img = load_nifti(args.nifti_file, return_img=True)
 voxel_order = "".join(aff2axcodes(img.affine))
-gtab = get_gtab(args.bvals, args.bvecs)
-mask = get_img(args.mask_nifti)
+gtab = gradient_table(args.bvals, args.bvecs)
+mask = load_nifti(args.mask_nifti, return_img=True)
 data = img.get_fdata()
 
 # resample mask if necessary
@@ -102,7 +99,6 @@ if mask.shape != data.shape:
                            img.shape[:3], img.affine,
                            mask.shape[:3], mask.affine)
     mask = affine_map.transform(mask.get_fdata())
-    #mask = np.round(mask)
 else:
     mask = mask.get_fdata()
 
@@ -122,28 +118,28 @@ else:
         np.save(args.fa_numpy, FA)
 
 # Setup tissue_classifier args
-#tissue_classifier = ThresholdTissueClassifier(FA, 0.1)
 metric_map = np.asarray(FA, 'float64')
 
 # resample roi if necessary
 if args.roi_nifti is not None:
-    roi = get_img(args.roi_nifti)
-    roi_data = roi.get_fdata()
+    roi_data, roi = load_nifti(args.roi_nifti,
+                               return_img=True,
+                               as_ndarray=True)
 else:
     roi_data = np.zeros(data.shape[:3])
-    roi_data[ FA > 0.1 ] = 1.
+    roi_data[FA > 0.1] = 1.
 
 # Create seeds for ROI
-seed_mask = utils.seeds_from_mask(roi_data, density=args.sampling_density, affine=np.eye(4))
+seed_mask = utils.seeds_from_mask(roi_data,
+                                  density=args.sampling_density,
+                                  affine=np.eye(4))
 
 # Setup model
-print('slowadcodf')
+print('OpdtModel')
 sh_order = 6
 model = OpdtModel(gtab, sh_order=sh_order, min_signal=1)
 
 # Setup direction getter args
-print('Bootstrap direction getter')
-#boot_dg = BootDirectionGetter.from_data(data, model, max_angle=60., sphere=small_sphere)
 b0s_mask = gtab.b0s_mask
 dwi_mask = ~b0s_mask
 
@@ -157,7 +153,7 @@ theta = sphere.theta
 phi = sphere.phi
 sampling_matrix, _, _ = shm.real_sym_sh_basis(sh_order, theta, phi)
 
-## from BootPmfGen __init__
+# from BootPmfGen __init__
 # setup H and R matrices
 # TODO: figure out how to get H, R matrices from direction getter object
 x, y, z = model.gtab.gradients[dwi_mask].T
@@ -173,15 +169,15 @@ print('streamline gen')
 global_chunk_size = args.chunk_size * args.ngpus
 nchunks = (seed_mask.shape[0] + global_chunk_size - 1) // global_chunk_size
 
-#streamline_generator = LocalTracking(boot_dg, tissue_classifier, seed_mask, affine=np.eye(4), step_size=.5)
-gpu_tracker = cuslines.GPUTracker(args.max_angle,
-                                  args.min_signal,
-                                  args.tc_threshold,
-                                  args.step_size,
-                                  dataf, H, R, delta_b, delta_q,
-                                  b0s_mask.astype(np.int32), metric_map, sampling_matrix,
-                                  sphere.vertices, sphere.edges.astype(np.int32),
-                                  ngpus=args.ngpus, rng_seed=0)
+gpu_tracker = cuslines.GPUTracker(
+    args.max_angle,
+    args.min_signal,
+    args.tc_threshold,
+    args.step_size,
+    dataf, H, R, delta_b, delta_q,
+    b0s_mask.astype(np.int32), metric_map, sampling_matrix,
+    sphere.vertices, sphere.edges.astype(np.int32),
+    ngpus=args.ngpus, rng_seed=0)
 t1 = time.time()
 streamline_time = 0
 io_time = 0
@@ -191,30 +187,35 @@ with tqdm(total=seed_mask.shape[0]) as pbar:
     for idx in range(int(nchunks)):
         # Main streamline computation
         ts = time.time()
-        streamlines = gpu_tracker.generate_streamlines(seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size])
+        streamlines = gpu_tracker.generate_streamlines(
+            seed_mask[idx * global_chunk_size:(idx+1) * global_chunk_size])
         te = time.time()
         streamline_time += (te-ts)
-        pbar.update(seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size].shape[0])
-        #print("Generated {} streamlines from {} seeds, time: {} s".format(len(streamlines),
-        #                                                                  seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size].shape[0],
-        #                                                                  te-ts))
+        pbar.update(
+            seed_mask[
+                idx * global_chunk_size:(idx+1) * global_chunk_size].shape[0])
 
         # Save tracklines file
         if args.output_prefix:
             if args.use_fast_write:
                 prefix = "{}.{}_{}".format(args.output_prefix, idx+1, nchunks)
                 ts = time.time()
-                gpu_tracker.dump_streamlines(prefix, voxel_order, roi_data.shape, img.header.get_zooms(), img.affine)
+                gpu_tracker.dump_streamlines(
+                    prefix, voxel_order, roi_data.shape,
+                    img.header.get_zooms(), img.affine)
                 te = time.time()
-                print("Saved streamlines to {}_*.trk, time {} s".format(prefix, te-ts))
+                print("Saved streamlines to {}_*.trk, time {} s".format(
+                    prefix, te-ts))
             else:
-                fname = "{}.{}_{}.trk".format(args.output_prefix, idx+1, nchunks)
+                fname = "{}.{}_{}.trk".format(
+                    args.output_prefix, idx+1, nchunks)
                 ts = time.time()
-                #save_tractogram(fname, streamlines, img.affine, vox_size=roi.header.get_zooms(), shape=roi_data.shape)
-                sft = StatefulTractogram(streamlines, args.nifti_file, Space.VOX)
+                sft = StatefulTractogram(
+                    streamlines, args.nifti_file, Space.VOX)
                 save_tractogram(sft, fname)
                 te = time.time()
-                print("Saved streamlines to {}, time {} s".format(fname, te-ts))
+                print("Saved streamlines to {}, time {} s".format(
+                    fname, te-ts))
             io_time += (te-ts)
 
 pbar.close()
@@ -225,4 +226,4 @@ print("Initialization time: {} sec".format(t1-t0))
 print("Streamline generation total time: {} sec".format(t2-t1))
 print("\tStreamline processing: {} sec".format(streamline_time))
 if args.output_prefix:
-  print("\tFile writing: {} sec".format(io_time))
+    print("\tFile writing: {} sec".format(io_time))
