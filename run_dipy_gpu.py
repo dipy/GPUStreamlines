@@ -85,10 +85,10 @@ parser.add_argument("--step-size", type=float, default=0.5,
                     help="default: 0.5")
 args = parser.parse_args()
 
-img = load_nifti(args.nifti_file, return_img=True)
+img_data, img_affine, img = load_nifti(args.nifti_file, return_img=True)
 voxel_order = "".join(aff2axcodes(img.affine))
 gtab = gradient_table(args.bvals, args.bvecs)
-mask = load_nifti(args.mask_nifti, return_img=True)
+mask_data, mask_affine, mask = load_nifti(args.mask_nifti, return_img=True)
 data = img.get_fdata()
 
 # resample mask if necessary
@@ -122,7 +122,7 @@ metric_map = np.asarray(FA, 'float64')
 
 # resample roi if necessary
 if args.roi_nifti is not None:
-    roi_data, roi = load_nifti(args.roi_nifti,
+    roi_data, roi_affine, roi = load_nifti(args.roi_nifti,
                                return_img=True,
                                as_ndarray=True)
 else:
