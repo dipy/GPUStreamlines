@@ -30,7 +30,7 @@ endif()
 #decide whether to use CUDA or not
 #find_package(CUDAToolkit REQUIRED)
 if(NOT CUDA_COMPUTE_CAPABILITY)
-  set(CUDA_COMPUTE_CAPABILITY 70 80)
+  set(CUDA_COMPUTE_CAPABILITY 70 75 80)
 endif()
 
 #Find OpenMP

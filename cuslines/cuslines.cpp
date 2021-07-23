@@ -141,8 +141,14 @@ class GPUTracker {
       //#pragma omp parallel for
       for (int n = 0; n < ngpus_; ++n) {
         CHECK_CUDA(cudaSetDevice(n));
-        CHECK_CUDA(cudaMallocManaged(&dataf_d[n], sizeof(*dataf_d[n]) * dataf_info.size));
-        CHECK_CUDA(cudaMemAdvise(dataf_d[n], sizeof(*dataf_d[n]) * dataf_info.size, cudaMemAdviseSetPreferredLocation, n));
+        int managed_supported;
+        CHECK_CUDA(cudaDeviceGetAttribute(&managed_supported, cudaDevAttrConcurrentManagedAccess, n));
+        if (managed_supported) {
+          CHECK_CUDA(cudaMallocManaged(&dataf_d[n], sizeof(*dataf_d[n]) * dataf_info.size));
+          CHECK_CUDA(cudaMemAdvise(dataf_d[n], sizeof(*dataf_d[n]) * dataf_info.size, cudaMemAdviseSetPreferredLocation, n));
+        } else {
+          CHECK_CUDA(cudaMalloc(&dataf_d[n], sizeof(*dataf_d[n]) * dataf_info.size));
+        }
         CHECK_CUDA(cudaMalloc(&H_d[n], sizeof(*H_d[n]) * H_info.size));
         CHECK_CUDA(cudaMalloc(&R_d[n], sizeof(*R_d[n]) * R_info.size));
         CHECK_CUDA(cudaMalloc(&delta_b_d[n], sizeof(*delta_b_d[n]) * delta_b_info.size));
