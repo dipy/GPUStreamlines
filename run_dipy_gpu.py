@@ -103,8 +103,14 @@ else:
     mask = mask.get_fdata()
 
 # load or compute and save FA file
-if (args.fa_numpy is not None) and os.path.isfile(args.fa_numpy):
-    FA = np.load(args.fa_numpy, allow_pickle=True)
+if (args.fa_file is not None) and os.path.isfile(args.fa_file):
+    _, fa_extension = os.path.splitext(filename)
+        if fa_extension in ['.npy', '.npz', '.pkl']:
+            FA = np.load(args.fa_file, allow_pickle=True)
+        elif fa_extension in ['.nii','.gz']:
+            FA, FA_affine = load_nifti(args.fa_file)
+        else:
+            raise TypeError('FA filename is not one of the supported format (.npy, .npz, .pkl, .nii, .gz).')
 else:
     # Fit
     tenmodel = dti.TensorModel(gtab, fit_method='WLS')
@@ -114,8 +120,8 @@ else:
     FA = tenfit.fa
     FA[np.isnan(FA)] = 0
 
-    if args.fa_numpy is not None:
-        np.save(args.fa_numpy, FA)
+    if args.fa_file is not None:
+        np.save(args.fa_file, FA)
 
 # Setup tissue_classifier args
 metric_map = np.asarray(FA, 'float64')
