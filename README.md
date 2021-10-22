@@ -1,6 +1,8 @@
 # GPUStreamlines
 
 ## Installation
+When cloning the repo, please use "git clone --recursive" to pull all the requirements.
+
 To install, simply run `./build_cuslines.sh`. This will place the cuslines library and files within a new subdirectory `./install` as well as copy the example script.
 
 ## Running the examples
