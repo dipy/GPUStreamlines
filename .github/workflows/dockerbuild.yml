@@ -6,7 +6,7 @@ on:
       - 'master'
   pull_request:
     branches:
-      - main
+      - master
 
 jobs:
   build:
@@ -22,6 +22,8 @@ jobs:
 
     - name: Checkout repo
       uses: actions/checkout@v2
+      with:
+        submodules: true
 
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v1
@@ -37,6 +39,6 @@ jobs:
         password: ${{secrets.CR_PAT}}
 
     - name: Build and push docker image
-      run: sh ./Docker/dockerbuild.sh \
+      run: sh ./dockerbuild.sh \
         "${{github.sha}}" \
         "dipy"
