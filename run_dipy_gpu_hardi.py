@@ -128,7 +128,7 @@ model = OpdtModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signa
 
 # Setup direction getter args
 print('Bootstrap direction getter')
-#boot_dg = BootDirectionGetter.from_data(data, model, max_angle=60., sphere=small_sphere, sh_order=args.sh_order, relative_peak_threshold=args.relative_peak_threshold, min_separation_angle=args.min_separation_angle)
+#boot_dg = BootDirectionGetter.from_data(data, model, max_angle=args.max_angle, sphere=small_sphere, sh_order=args.sh_order, relative_peak_threshold=args.relative_peak_threshold, min_separation_angle=args.min_separation_angle)
 b0s_mask = gtab.b0s_mask
 dwi_mask = ~b0s_mask
 
@@ -158,7 +158,7 @@ print('streamline gen')
 global_chunk_size = args.chunk_size * args.ngpus
 nchunks = (seed_mask.shape[0] + global_chunk_size - 1) // global_chunk_size
 
-#streamline_generator = LocalTracking(boot_dg, tissue_classifier, seed_mask, affine=np.eye(4), step_size=.5)
+#streamline_generator = LocalTracking(boot_dg, tissue_classifier, seed_mask, affine=np.eye(4), step_size=args.step_size)
 
 gpu_tracker = cuslines.GPUTracker(args.max_angle * np.pi/180,
                                   args.min_signal,
@@ -185,8 +185,8 @@ for idx in range(int(nchunks)):
 
   # Save tracklines file
   if args.output_prefix:
-    #print(seed_mask)
-    #print(streamlines)
+    print(seed_mask)
+    print(streamlines)
     if args.use_fast_write:
       prefix = "{}.{}_{}".format(args.output_prefix, idx+1, nchunks)
       ts = time.time()

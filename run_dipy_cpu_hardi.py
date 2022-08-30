@@ -77,6 +77,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--output-prefix", type=str, default ='', help="path to the output file")
 parser.add_argument("--chunk-size", type=int, required=True, help="how many seeds to process per sweep")
 parser.add_argument("--nseeds", type=int, default=None, help="how many seeds to process in total")
+parser.add_argument("--max-angle", type=float, default=60, help="max angle (in degrees)")
+parser.add_argument("--min-signal", type=float, default=1.0, help="default: 1.0")
+parser.add_argument("--step-size", type=float, default=0.5, help="default: 0.5")
 parser.add_argument("--sh-order",type=int,default=4,help="sh_order")
 parser.add_argument("--fa-threshold",type=float,default=0.1,help="FA threshold")
 parser.add_argument("--relative-peak-threshold",type=float,default=0.25,help="relative peak threshold")
@@ -120,12 +123,12 @@ seed_mask = utils.seeds_from_mask(roi_data, density=args.sampling_density, affin
 seed_mask = seed_mask[500:501]
 
 # Setup model
-#model = CsaOdfModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=1)
-model = OpdtModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=1)
+#model = CsaOdfModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=args.min_signal)
+model = OpdtModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=args.min_signal)
 
 # Setup direction getter args
 print('Bootstrap direction getter')
-boot_dg = BootDirectionGetter.from_data(data, model, max_angle=60., sphere=small_sphere, sh_order=args.sh_order, relative_peak_threshold=args.relative_peak_threshold, min_separation_angle=args.min_separation_angle)
+boot_dg = BootDirectionGetter.from_data(data, model, max_angle=args.max_angle, sphere=small_sphere, sh_order=args.sh_order, relative_peak_threshold=args.relative_peak_threshold, min_separation_angle=args.min_separation_angle)
 
 print('streamline gen')
 global_chunk_size = args.chunk_size
@@ -137,8 +140,8 @@ io_time = 0
 for idx in range(int(nchunks)):
   # Main streamline computation
   ts = time.time()
-  #streamline_generator = LocalTracking(boot_dg, tissue_classifier, seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size], affine=img_affine, step_size=.5)
-  streamline_generator = LocalTracking(boot_dg, tissue_classifier, seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size], affine=np.eye(4), step_size=.5)
+  #streamline_generator = LocalTracking(boot_dg, tissue_classifier, seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size], affine=img_affine, step_size=args.step_size)
+  streamline_generator = LocalTracking(boot_dg, tissue_classifier, seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size], affine=np.eye(4), step_size=args.step_size)
   streamlines = [s for s in streamline_generator]
   te = time.time()
   streamline_time += (te-ts)
@@ -153,8 +156,8 @@ for idx in range(int(nchunks)):
     #save_tractogram(fname, streamlines, img.affine, vox_size=roi.header.get_zooms(), shape=roi_data.shape)
     #save_tractogram(fname, streamlines)
     #sft = StatefulTractogram(streamlines, hardi_nifti_fname, Space.VOX)
-    #print(seed_mask)
-    #print(streamlines)
+    print(seed_mask)
+    print(streamlines)
 
     #inv_affine = npl.inv(img_affine)
     #streamlines = transform_streamlines(streamlines,inv_affine)
