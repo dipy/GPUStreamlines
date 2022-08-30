@@ -33,7 +33,7 @@
 
 #include "globals.h"
 
-void generate_streamlines_cuda_mgpu(const REAL max_angle, const REAL min_signal, const REAL tc_threshold, const REAL step_size,
+void generate_streamlines_cuda_mgpu(const int model_type, const REAL max_angle, const REAL min_signal, const REAL tc_threshold, const REAL step_size,
                                     const REAL relative_peak_thresh, const REAL min_separation_angle,
 				    const int nseeds, const std::vector<REAL*> &seeds_d,
                                     const int dimx, const int dimy, const int dimz, const int dimt,

@@ -83,9 +83,10 @@ parser.add_argument("--step-size", type=float, default=0.5, help="default: 0.5")
 parser.add_argument("--sh-order",type=int,default=4,help="sh_order")
 parser.add_argument("--fa-threshold",type=float,default=0.1,help="FA threshold")
 parser.add_argument("--relative-peak-threshold",type=float,default=0.25,help="relative peak threshold")
-parser.add_argument("--min_separation-angle",type=float,default=45,help="min separation angle (in degrees)")
+parser.add_argument("--min-separation-angle",type=float,default=45,help="min separation angle (in degrees)")
 parser.add_argument("--sm-lambda",type=float,default=0.006,help="smoothing lambda")
 parser.add_argument("--sampling-density", type=int, default=3, help="sampling density for seed generation")
+parser.add_argument("--model", type=str, default="opdt", choices=['opdt', 'csaodf'], help="model to use")
 
 args = parser.parse_args()
 
@@ -119,12 +120,15 @@ metric_map = np.asarray(FA, 'float64')
 # Create seeds for ROI
 #seed_mask = utils.seeds_from_mask(roi_data, density=sampling_density, affine=img_affine)
 seed_mask = utils.seeds_from_mask(roi_data, density=args.sampling_density, affine=np.eye(4))
-#seed_mask = seed_mask[1000:args.nseeds]
-seed_mask = seed_mask[500:501]
+seed_mask = seed_mask[0:args.nseeds]
 
 # Setup model
-#model = CsaOdfModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=args.min_signal)
-model = OpdtModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=args.min_signal)
+if args.model == "opdt":
+  print("Running OPDT model...")
+  model = OpdtModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=args.min_signal)
+else:
+  print("Running CSAODF model...")
+  model = CsaOdfModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=args.min_signal)
 
 # Setup direction getter args
 print('Bootstrap direction getter')
@@ -156,8 +160,8 @@ for idx in range(int(nchunks)):
     #save_tractogram(fname, streamlines, img.affine, vox_size=roi.header.get_zooms(), shape=roi_data.shape)
     #save_tractogram(fname, streamlines)
     #sft = StatefulTractogram(streamlines, hardi_nifti_fname, Space.VOX)
-    print(seed_mask)
-    print(streamlines)
+    #print(seed_mask)
+    #print(streamlines)
 
     #inv_affine = npl.inv(img_affine)
     #streamlines = transform_streamlines(streamlines,inv_affine)

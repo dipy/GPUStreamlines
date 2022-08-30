@@ -56,7 +56,7 @@
 
 using namespace cuwsort;
 
-#define USE_FIXED_PERMUTATION
+//#define USE_FIXED_PERMUTATION
 #ifdef USE_FIXED_PERMUTATION
 //__device__ const int fixedPerm[] = {44, 47, 53,  0,  3,  3, 39,  9, 19, 21, 50, 36, 23,
 //                                     6, 24, 24, 12,  1, 38, 39, 23, 46, 24, 17, 37, 25, 
@@ -366,6 +366,52 @@ __device__ void ndotp_log_d(const int N,
                 }
         }
         return;
+}
+
+template<int BDIM_X,
+	 typename VAL_T>
+__device__ void ndotp_log_csa_d(const int N,
+				const int M,
+				const VAL_T *__restrict__ srcV,
+				const VAL_T *__restrict__ srcM,
+				VAL_T *__restrict__ dstV) {
+
+	const int tidx = threadIdx.x;
+
+	const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
+	const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
+	// Clamp values
+	constexpr VAL_T min = .001;
+	constexpr VAL_T max = .999;
+
+	//#pragma unroll
+	for(int i = 0; i < N; i++) {
+
+		VAL_T __tmp = 0;
+
+		//#pragma unroll
+		for(int j = 0; j < M; j += BDIM_X) {
+			if (j+tidx < M) {
+				const VAL_T v = MIN(MAX(srcV[j+tidx], min), max);
+				__tmp += LOG(-LOG(v)) * srcM[i*M + j+tidx];
+			}
+		}
+		#pragma unroll
+		for(int j = BDIM_X/2; j; j /= 2) {
+#if 0
+			__tmp += __shfl_xor_sync(WMASK, __tmp, j, BDIM_X);
+#else
+			__tmp += __shfl_down_sync(WMASK, __tmp, j, BDIM_X);
+#endif
+		}
+		// values could be held by BDIM_X threads and written
+		// together every BDIM_X iterations...
+
+		if (tidx == 0) {
+			dstV[i] = __tmp;
+		}
+	}
+	return;
 }
 
 template<int BDIM_X,
@@ -816,6 +862,7 @@ template<int BDIM_X,
          typename REAL_T,
          typename REAL3_T>
 __device__ int get_direction_d(curandStatePhilox4_32_10_t *st,
+			       const int model_type,
                                const REAL_T max_angle,
 			       const REAL_T min_signal,
 			       const REAL_T relative_peak_thres,
@@ -913,7 +960,6 @@ __device__ int get_direction_d(curandStatePhilox4_32_10_t *st,
                                 if (j+tidx < hr_side) {
 #ifdef USE_FIXED_PERMUTATION
                                         const int srcPermInd = fixedPerm[j+tidx];
-                                         printf("srcPermInd: %d\n", srcPermInd);
 #else
                                         const int srcPermInd = curand(st) % hr_side;
 //                                        if (srcPermInd < 0 || srcPermInd >= hr_side) {
@@ -962,16 +1008,25 @@ __device__ int get_direction_d(curandStatePhilox4_32_10_t *st,
 			maskGet<BDIM_X>(dimt, b0s_mask, __vox_data_sh, __msk_data_sh);
 			__syncwarp(WMASK);
 
-                        ndotp_log_d<BDIM_X>(delta_nr, hr_side, __msk_data_sh, delta_q, __r_sh);
-                        ndotp_d    <BDIM_X>(delta_nr, hr_side, __msk_data_sh, delta_b, __h_sh);
+			if (model_type == 0) {
+				ndotp_log_d<BDIM_X>(delta_nr, hr_side, __msk_data_sh, delta_q, __r_sh);
+				ndotp_d    <BDIM_X>(delta_nr, hr_side, __msk_data_sh, delta_b, __h_sh);
+				__syncwarp(WMASK);
+				#pragma unroll
+				for(int j = tidx; j < delta_nr; j += BDIM_X) {
+					__r_sh[j] -= __h_sh[j];
+				}
+				__syncwarp(WMASK);
+			} else if (model_type == 1) {
+				constexpr REAL_T _n0_const = 0.28209479177387814; // .5 / sqrt(pi)
+				ndotp_log_csa_d<BDIM_X>(delta_nr, hr_side, __msk_data_sh, delta_q, __r_sh);
+				__syncwarp(WMASK);
+				if (tidx == 0) {
+					__r_sh[0] = _n0_const;
+				}
+				__syncwarp(WMASK);
+			}
 
-                        __syncwarp(WMASK);
-
-                        #pragma unroll
-                        for(int j = tidx; j < delta_nr; j += BDIM_X) {
-				__r_sh[j] -= __h_sh[j];
-                        }
-                        __syncwarp(WMASK);
                         // __r_sh[tidy] <- python 'coef'
 
                         ndotp_d<BDIM_X>(samplm_nr, delta_nr, __r_sh, sampling_matrix, __h_sh);
@@ -1094,6 +1149,7 @@ template<int BDIM_X,
          typename REAL_T,
          typename REAL3_T>
 __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
+			 const int model_type,
 			 const REAL_T max_angle,
 			 const REAL_T min_signal,
 			 const REAL_T tc_threshold,
@@ -1159,6 +1215,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                 int ndir = get_direction_d<BDIM_X,
                                            BDIM_Y,
                                            5>(st,
+					      model_type,
 					      max_angle,
 					      min_signal,
 					      relative_peak_thres,
@@ -1227,7 +1284,8 @@ template<int BDIM_X,
          int BDIM_Y,
          typename REAL_T,
          typename REAL3_T>
-__global__ void getNumStreamlines_k(const REAL_T max_angle,
+__global__ void getNumStreamlines_k(const int model_type,
+                                    const REAL_T max_angle,
 				    const REAL_T min_signal,
 				    const REAL_T relative_peak_thres,
 				    const REAL_T min_separation_angle,
@@ -1283,6 +1341,7 @@ __global__ void getNumStreamlines_k(const REAL_T max_angle,
         int ndir = get_direction_d<BDIM_X,
                                    BDIM_Y,
                                    1>(&st,
+				      model_type,
 				      max_angle,
 				      min_signal,
 				      relative_peak_thres,
@@ -1323,7 +1382,8 @@ template<int BDIM_X,
          int BDIM_Y,
          typename REAL_T,
          typename REAL3_T>
-__global__ void genStreamlinesMerge_k(const REAL_T max_angle,
+__global__ void genStreamlinesMerge_k(const int model_type,
+				      const REAL_T max_angle,
 				      const REAL_T min_signal,
 				      const REAL_T tc_threshold,
 				      const REAL_T step_size,
@@ -1407,6 +1467,7 @@ __global__ void genStreamlinesMerge_k(const REAL_T max_angle,
                 int stepsB;
                 const int tissue_classB = tracker_d<BDIM_X,
                                                     BDIM_Y>(&st,
+							    model_type,
 						            max_angle,
 						            min_signal,
 							    tc_threshold,
@@ -1446,6 +1507,7 @@ __global__ void genStreamlinesMerge_k(const REAL_T max_angle,
                 int stepsF;
                 const int tissue_classF = tracker_d<BDIM_X,
                                                     BDIM_Y>(&st,
+							    model_type,
 						            max_angle,
 						            min_signal,
 							    tc_threshold,
@@ -1494,7 +1556,7 @@ __global__ void genStreamlinesMerge_k(const REAL_T max_angle,
         return;
 }
 
-void generate_streamlines_cuda_mgpu(const REAL max_angle, const REAL min_signal, const REAL tc_threshold, const REAL step_size,
+void generate_streamlines_cuda_mgpu(const int model_type, const REAL max_angle, const REAL min_signal, const REAL tc_threshold, const REAL step_size,
                                     const REAL relative_peak_thresh, const REAL min_separation_angle,
                                     const int nseeds, const std::vector<REAL*> &seeds_d,
                                     const int dimx, const int dimy, const int dimz, const int dimt,
@@ -1545,7 +1607,8 @@ void generate_streamlines_cuda_mgpu(const REAL max_angle, const REAL min_signal,
     // Precompute number of streamlines before allocating memory
     getNumStreamlines_k<THR_X_SL,
                         THR_X_BL/THR_X_SL>
-                        <<<grid, block, shSizeGNS>>>(max_angle,
+                        <<<grid, block, shSizeGNS>>>(model_type,
+                                                     max_angle,
 						     min_signal,
 						     relative_peak_thresh,
 						     min_separation_angle,
@@ -1654,7 +1717,8 @@ void generate_streamlines_cuda_mgpu(const REAL max_angle, const REAL min_signal,
     //fprintf(stderr, "Launching kernel with %u blocks of size (%u, %u)\n", grid.x, block.x, block.y);
     genStreamlinesMerge_k<THR_X_SL,
                           THR_X_BL/THR_X_SL>
-                          <<<grid, block, shSizeGNS, streams[n]>>>(max_angle,
+                          <<<grid, block, shSizeGNS, streams[n]>>>(model_type,
+								   max_angle,
 								   min_signal,
 								   tc_threshold,
 								   step_size,

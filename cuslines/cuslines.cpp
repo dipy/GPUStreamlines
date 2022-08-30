@@ -58,9 +58,15 @@ py::capsule cleanup(T* ptr) {
          });
 }
 
+enum ModelType {
+  OPDT = 0,
+  CSAODF = 1,
+};
+
 class GPUTracker {
   public:
-    GPUTracker(double max_angle,
+    GPUTracker(ModelType model_type,
+               double max_angle,
                double min_signal,
                double tc_threshold,
                double step_size,
@@ -123,6 +129,7 @@ class GPUTracker {
       std::cerr << "Creating GPUTracker with " << ngpus << " GPUs..." << std::endl;
       ngpus_ = ngpus;
 
+      model_type_ = model_type;
       max_angle_ = max_angle;
       min_signal_ = min_signal;
       tc_threshold_ = tc_threshold;
@@ -224,7 +231,7 @@ class GPUTracker {
       std::vector<int> nSlines(ngpus_);
 
       // Call GPU routine
-      generate_streamlines_cuda_mgpu(max_angle_, min_signal_, tc_threshold_, step_size_,
+      generate_streamlines_cuda_mgpu(model_type_, max_angle_, min_signal_, tc_threshold_, step_size_,
                                      relative_peak_thresh_, min_separation_angle_,
                                      nseeds, seeds_d,
                                      dimx_, dimy_, dimz_, dimt_,
@@ -286,6 +293,7 @@ class GPUTracker {
     int nedges_;
     int delta_nr_, samplm_nr_;
 
+    ModelType model_type_;
     double max_angle_;
     double tc_threshold_;
     double min_signal_;
@@ -314,8 +322,12 @@ class GPUTracker {
 
 
 PYBIND11_MODULE(cuslines, m) {
+  py::enum_<ModelType>(m, "ModelType")
+    .value("OPDT", OPDT)
+    .value("CSAODF", CSAODF);
+
   py::class_<GPUTracker>(m, "GPUTracker")
-    .def(py::init<double, double, double, double,
+    .def(py::init<ModelType, double, double, double, double,
                   double, double,
 		  np_array_cast, np_array,
                   np_array, np_array,
@@ -323,7 +335,7 @@ PYBIND11_MODULE(cuslines, m) {
                   np_array, np_array,
                   np_array, np_array_int,
                   int, int, int>(),
-                  py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(),
+                  py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(),
                   py::arg().noconvert(), py::arg().noconvert(),
                   py::arg().noconvert(), py::arg().noconvert(),
                   py::arg().noconvert(), py::arg().noconvert(),

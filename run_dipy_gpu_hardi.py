@@ -41,7 +41,7 @@ from dipy.tracking import utils
 from dipy.core.gradients import gradient_table
 from dipy.data import small_sphere
 #from dipy.direction import BootDirectionGetter
-from dipy.reconst.shm import OpdtModel
+from dipy.reconst.shm import OpdtModel, CsaOdfModel
 #from dipy.tracking.local import LocalTracking, ThresholdTissueClassifier
 from dipy.reconst import shm
 from dipy.data import get_fnames
@@ -85,6 +85,7 @@ parser.add_argument("--relative-peak-threshold",type=float,default=0.25,help="re
 parser.add_argument("--min-separation-angle",type=float,default=45,help="min separation angle (in degrees)")
 parser.add_argument("--sm-lambda",type=float,default=0.006,help="smoothing lambda")
 parser.add_argument("--sampling-density", type=int, default=3, help="sampling density for seed generation")
+parser.add_argument("--model", type=str, default="opdt", choices=['opdt', 'csaodf'], help="model to use")
 args = parser.parse_args()
 
 # Get Stanford HARDI data
@@ -119,12 +120,22 @@ metric_map = np.asarray(FA, 'float64')
 # Create seeds for ROI
 #seed_mask = utils.seeds_from_mask(roi_data, density=sampling_density, affine=img_affine)
 seed_mask = utils.seeds_from_mask(roi_data, density=args.sampling_density, affine=np.eye(4))
-#seed_mask = seed_mask[0:args.nseeds]
-seed_mask = seed_mask[500:501]
+seed_mask = seed_mask[0:args.nseeds]
 
 # Setup model
-#model = CsaOdfModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=1)
-model = OpdtModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=1)
+if args.model == "opdt":
+  print("Running OPDT model...")
+  model = OpdtModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=args.min_signal)
+  fit_matrix = model._fit_matrix
+  delta_b, delta_q = fit_matrix
+else:
+  print("Running CSAODF model...")
+  model = CsaOdfModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=args.min_signal)
+  fit_matrix = model._fit_matrix
+  # Unlike OPDT, CSA has a single matrix used for fit_matrix. Populating delta_b and delta_q with necessary values for
+  # now.
+  delta_b = fit_matrix
+  delta_q = fit_matrix
 
 # Setup direction getter args
 print('Bootstrap direction getter')
@@ -132,9 +143,6 @@ print('Bootstrap direction getter')
 b0s_mask = gtab.b0s_mask
 dwi_mask = ~b0s_mask
 
-# get fit_matrix from model
-fit_matrix = model._fit_matrix
-delta_b, delta_q = fit_matrix
 
 # setup sampling matrix
 sphere = small_sphere
@@ -160,7 +168,8 @@ nchunks = (seed_mask.shape[0] + global_chunk_size - 1) // global_chunk_size
 
 #streamline_generator = LocalTracking(boot_dg, tissue_classifier, seed_mask, affine=np.eye(4), step_size=args.step_size)
 
-gpu_tracker = cuslines.GPUTracker(args.max_angle * np.pi/180,
+gpu_tracker = cuslines.GPUTracker(cuslines.ModelType.OPDT if args.model == "opdt" else cuslines.ModelType.CSAODF,
+                                  args.max_angle * np.pi/180,
                                   args.min_signal,
                                   args.fa_threshold,
                                   args.step_size,
@@ -185,8 +194,8 @@ for idx in range(int(nchunks)):
 
   # Save tracklines file
   if args.output_prefix:
-    print(seed_mask)
-    print(streamlines)
+    #print(seed_mask)
+    #print(streamlines)
     if args.use_fast_write:
       prefix = "{}.{}_{}".format(args.output_prefix, idx+1, nchunks)
       ts = time.time()
