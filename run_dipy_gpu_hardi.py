@@ -76,10 +76,15 @@ parser.add_argument("--chunk-size", type=int, required=True, help="how many seed
 parser.add_argument("--nseeds", type=int, default=None, help="how many seeds to process in total")
 parser.add_argument("--ngpus", type=int, required=True, help="number of GPUs to use")
 parser.add_argument("--use-fast-write", action='store_true', help="use fast file write")
-parser.add_argument("--max-angle", type=float, default=1.0471975511965976, help="default: 60 deg (in rad)")
+parser.add_argument("--max-angle", type=float, default=60, help="max angle (in degrees)")
 parser.add_argument("--min-signal", type=float, default=1.0, help="default: 1.0")
-parser.add_argument("--tc-threshold", type=float, default=0.1, help="default: 0.1")
 parser.add_argument("--step-size", type=float, default=0.5, help="default: 0.5")
+parser.add_argument("--sh-order",type=int,default=4,help="sh_order")
+parser.add_argument("--fa-threshold",type=float,default=0.1,help="FA threshold")
+parser.add_argument("--relative-peak-threshold",type=float,default=0.25,help="relative peak threshold")
+parser.add_argument("--min-separation-angle",type=float,default=45,help="min separation angle (in degrees)")
+parser.add_argument("--sm-lambda",type=float,default=0.006,help="smoothing lambda")
+parser.add_argument("--sampling-density", type=int, default=3, help="sampling density for seed generation")
 args = parser.parse_args()
 
 # Get Stanford HARDI data
@@ -108,21 +113,22 @@ FA = tenfit.fa
 FA[np.isnan(FA)] = 0
 
 # Setup tissue_classifier args
-#tissue_classifier = ThresholdTissueClassifier(FA, 0.1)
+#tissue_classifier = ThresholdTissueClassifier(FA, args.fa_threshold)
 metric_map = np.asarray(FA, 'float64')
 
 # Create seeds for ROI
-seed_mask = utils.seeds_from_mask(roi_data, density=3, affine=np.eye(4))
-seed_mask = seed_mask[0:args.nseeds]
+#seed_mask = utils.seeds_from_mask(roi_data, density=sampling_density, affine=img_affine)
+seed_mask = utils.seeds_from_mask(roi_data, density=args.sampling_density, affine=np.eye(4))
+#seed_mask = seed_mask[0:args.nseeds]
+seed_mask = seed_mask[500:501]
 
 # Setup model
-print('slowadcodf')
-sh_order = 6
-model = OpdtModel(gtab, sh_order=sh_order, min_signal=1)
+#model = CsaOdfModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=1)
+model = OpdtModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=1)
 
 # Setup direction getter args
 print('Bootstrap direction getter')
-#boot_dg = BootDirectionGetter.from_data(data, model, max_angle=60., sphere=small_sphere)
+#boot_dg = BootDirectionGetter.from_data(data, model, max_angle=60., sphere=small_sphere, sh_order=args.sh_order, relative_peak_threshold=args.relative_peak_threshold, min_separation_angle=args.min_separation_angle)
 b0s_mask = gtab.b0s_mask
 dwi_mask = ~b0s_mask
 
@@ -134,14 +140,14 @@ delta_b, delta_q = fit_matrix
 sphere = small_sphere
 theta = sphere.theta
 phi = sphere.phi
-sampling_matrix, _, _ = shm.real_sym_sh_basis(sh_order, theta, phi)
+sampling_matrix, _, _ = shm.real_sym_sh_basis(args.sh_order, theta, phi)
 
 ## from BootPmfGen __init__
 # setup H and R matrices
 # TODO: figure out how to get H, R matrices from direction getter object
 x, y, z = model.gtab.gradients[dwi_mask].T
 r, theta, phi = shm.cart2sphere(x, y, z)
-B, _, _ = shm.real_sym_sh_basis(sh_order, theta, phi)
+B, _, _ = shm.real_sym_sh_basis(args.sh_order, theta, phi)
 H = shm.hat(B)
 R = shm.lcr_matrix(H)
 
@@ -154,10 +160,12 @@ nchunks = (seed_mask.shape[0] + global_chunk_size - 1) // global_chunk_size
 
 #streamline_generator = LocalTracking(boot_dg, tissue_classifier, seed_mask, affine=np.eye(4), step_size=.5)
 
-gpu_tracker = cuslines.GPUTracker(args.max_angle,
+gpu_tracker = cuslines.GPUTracker(args.max_angle * np.pi/180,
                                   args.min_signal,
-                                  args.tc_threshold,
+                                  args.fa_threshold,
                                   args.step_size,
+                                  args.relative_peak_threshold,
+                                  args.min_separation_angle * np.pi/180,
                                   dataf, H, R, delta_b, delta_q,
                                   b0s_mask.astype(np.int32), metric_map, sampling_matrix,
                                   sphere.vertices, sphere.edges.astype(np.int32),
@@ -177,6 +185,8 @@ for idx in range(int(nchunks)):
 
   # Save tracklines file
   if args.output_prefix:
+    #print(seed_mask)
+    #print(streamlines)
     if args.use_fast_write:
       prefix = "{}.{}_{}".format(args.output_prefix, idx+1, nchunks)
       ts = time.time()

@@ -32,6 +32,7 @@ import random
 import time
 
 import numpy as np
+import numpy.linalg as npl
 
 import dipy.reconst.dti as dti
 from dipy.io import read_bvals_bvecs
@@ -41,18 +42,19 @@ from dipy.tracking import utils
 from dipy.core.gradients import gradient_table
 from dipy.data import small_sphere
 from dipy.direction import BootDirectionGetter
-from dipy.reconst.shm import OpdtModel
+from dipy.reconst.shm import OpdtModel, CsaOdfModel
 from dipy.tracking.local_tracking import LocalTracking
 from dipy.tracking.stopping_criterion import ThresholdStoppingCriterion
 from dipy.reconst import shm
 from dipy.data import get_fnames
 from dipy.data import read_stanford_pve_maps
+from dipy.tracking.streamline import transform_streamlines
 
 import nibabel as nib
 from nibabel.orientations import aff2axcodes
 
 # Import custom module
-import cuslines.cuslines as cuslines
+#import cuslines.cuslines as cuslines
 
 t0 = time.time()
 
@@ -75,6 +77,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--output-prefix", type=str, default ='', help="path to the output file")
 parser.add_argument("--chunk-size", type=int, required=True, help="how many seeds to process per sweep")
 parser.add_argument("--nseeds", type=int, default=None, help="how many seeds to process in total")
+parser.add_argument("--sh-order",type=int,default=4,help="sh_order")
+parser.add_argument("--fa-threshold",type=float,default=0.1,help="FA threshold")
+parser.add_argument("--relative-peak-threshold",type=float,default=0.25,help="relative peak threshold")
+parser.add_argument("--min_separation-angle",type=float,default=45,help="min separation angle (in degrees)")
+parser.add_argument("--sm-lambda",type=float,default=0.006,help="smoothing lambda")
+parser.add_argument("--sampling-density", type=int, default=3, help="sampling density for seed generation")
+
 args = parser.parse_args()
 
 # Get Stanford HARDI data
@@ -84,6 +93,7 @@ wm_data = wm.get_fdata()
 
 img = get_img(hardi_nifti_fname)
 voxel_order = "".join(aff2axcodes(img.affine))
+img_affine = img.affine
 
 gtab = get_gtab(hardi_bval_fname, hardi_bvec_fname)
 #roi = get_img(hardi_nifti_fname)
@@ -100,22 +110,22 @@ FA = tenfit.fa
 FA[np.isnan(FA)] = 0
 
 # Setup tissue_classifier args
-tissue_classifier = ThresholdStoppingCriterion(FA, 0.1)
+tissue_classifier = ThresholdStoppingCriterion(FA, args.fa_threshold)
 metric_map = np.asarray(FA, 'float64')
 
 # Create seeds for ROI
-seed_mask = utils.seeds_from_mask(roi_data, density=3, affine=np.eye(4))
-seed_mask = seed_mask[0:args.nseeds]
+#seed_mask = utils.seeds_from_mask(roi_data, density=sampling_density, affine=img_affine)
+seed_mask = utils.seeds_from_mask(roi_data, density=args.sampling_density, affine=np.eye(4))
+#seed_mask = seed_mask[1000:args.nseeds]
+seed_mask = seed_mask[500:501]
 
 # Setup model
-print('slowadcodf')
-sh_order = 6
-model = OpdtModel(gtab, sh_order=sh_order, min_signal=1)
+#model = CsaOdfModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=1)
+model = OpdtModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=1)
 
 # Setup direction getter args
 print('Bootstrap direction getter')
-boot_dg = BootDirectionGetter.from_data(data, model, max_angle=60., sphere=small_sphere)
-
+boot_dg = BootDirectionGetter.from_data(data, model, max_angle=60., sphere=small_sphere, sh_order=args.sh_order, relative_peak_threshold=args.relative_peak_threshold, min_separation_angle=args.min_separation_angle)
 
 print('streamline gen')
 global_chunk_size = args.chunk_size
@@ -127,6 +137,7 @@ io_time = 0
 for idx in range(int(nchunks)):
   # Main streamline computation
   ts = time.time()
+  #streamline_generator = LocalTracking(boot_dg, tissue_classifier, seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size], affine=img_affine, step_size=.5)
   streamline_generator = LocalTracking(boot_dg, tissue_classifier, seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size], affine=np.eye(4), step_size=.5)
   streamlines = [s for s in streamline_generator]
   te = time.time()
@@ -141,6 +152,12 @@ for idx in range(int(nchunks)):
     ts = time.time()
     #save_tractogram(fname, streamlines, img.affine, vox_size=roi.header.get_zooms(), shape=roi_data.shape)
     #save_tractogram(fname, streamlines)
+    #sft = StatefulTractogram(streamlines, hardi_nifti_fname, Space.VOX)
+    #print(seed_mask)
+    #print(streamlines)
+
+    #inv_affine = npl.inv(img_affine)
+    #streamlines = transform_streamlines(streamlines,inv_affine)
     sft = StatefulTractogram(streamlines, hardi_nifti_fname, Space.VOX)
     save_tractogram(sft, fname)
     te = time.time()

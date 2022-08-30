@@ -56,13 +56,23 @@
 
 using namespace cuwsort;
 
-//#define USE_FIXED_PERMUTATION
+#define USE_FIXED_PERMUTATION
 #ifdef USE_FIXED_PERMUTATION
-__device__ const int fixedPerm[] = {44, 47, 53,  0,  3,  3, 39,  9, 19, 21, 50, 36, 23,
-                                     6, 24, 24, 12,  1, 38, 39, 23, 46, 24, 17, 37, 25, 
-                                    13,  8,  9, 20, 51, 16, 51,  5, 15, 47,  0, 18, 35, 
-                                    24, 49, 51, 29, 19, 19, 14, 39, 32,  1,  9, 32, 31,
-                                    10, 52, 23};
+//__device__ const int fixedPerm[] = {44, 47, 53,  0,  3,  3, 39,  9, 19, 21, 50, 36, 23,
+//                                     6, 24, 24, 12,  1, 38, 39, 23, 46, 24, 17, 37, 25, 
+//                                    13,  8,  9, 20, 51, 16, 51,  5, 15, 47,  0, 18, 35, 
+//                                    24, 49, 51, 29, 19, 19, 14, 39, 32,  1,  9, 32, 31,
+//                                    10, 52, 23};
+__device__ const int fixedPerm[] = {
+  47, 117,  67, 103,   9,  21,  36,  87,  70,  88, 140,  58,  39,  87,  88,  81,  25,  77,
+  72,   9, 148, 115,  79,  82,  99,  29, 147, 147, 142,  32,   9, 127,  32,  31, 114,  28,
+  34, 128, 128,  53, 133,  38,  17,  79, 132, 105,  42,  31, 120,   1,  65,  57,  35, 102,
+ 119,  11,  82,  91, 128, 142,  99,  53, 140, 121,  84,  68,   6,  47, 127, 131, 100,  78,
+ 143, 148,  23, 141, 117,  85,  48,  49,  69,  95,  94,   0, 113,  36,  48,  93, 131,  98,
+  42, 112, 149, 127,   0, 138, 114,  43, 127,  23, 130, 121,  98,  62, 123,  82, 148,  50,
+  14,  41,  58,  36,  10,  86,  43, 104,  11,   2,  51,  80,  32, 128,  38,  19,  42, 115,
+  77,  30,  24, 125,   2,   3,  94, 107,  13, 112,  40,  72,  19,  95,  72,  67,  61,  14,
+  96,   4, 139,  86, 121, 109};
 #endif
 
 
@@ -480,8 +490,8 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
                                  const int num_edges,
 				 int samplm_nr,
 				 int *__restrict__ __shInd,
-                                 const REAL_T relative_peak_thres=static_cast<REAL_T>(0.5),
-                                 const REAL_T min_separation_angle=static_cast<REAL_T>(0.4363323129985824)) { // 20 degrees in rads
+				 const REAL_T relative_peak_thres,
+				 const REAL_T min_separation_angle) {
 
         const int tidx = threadIdx.x;
 
@@ -808,6 +818,8 @@ template<int BDIM_X,
 __device__ int get_direction_d(curandStatePhilox4_32_10_t *st,
                                const REAL_T max_angle,
 			       const REAL_T min_signal,
+			       const REAL_T relative_peak_thres,
+			       const REAL_T min_separation_angle,
 			       REAL3_T dir,
                                const int dimx,
                                const int dimy,
@@ -901,6 +913,7 @@ __device__ int get_direction_d(curandStatePhilox4_32_10_t *st,
                                 if (j+tidx < hr_side) {
 #ifdef USE_FIXED_PERMUTATION
                                         const int srcPermInd = fixedPerm[j+tidx];
+                                         printf("srcPermInd: %d\n", srcPermInd);
 #else
                                         const int srcPermInd = curand(st) % hr_side;
 //                                        if (srcPermInd < 0 || srcPermInd >= hr_side) {
@@ -1015,7 +1028,9 @@ __device__ int get_direction_d(curandStatePhilox4_32_10_t *st,
                                                            sphere_edges,
                                                            num_edges,
 							   samplm_nr,
-							   reinterpret_cast<int *>(__r_sh)); // reuse __r_sh as shInd in func which is large enough
+							   reinterpret_cast<int *>(__r_sh), // reuse __r_sh as shInd in func which is large enough
+							   relative_peak_thres,
+							   min_separation_angle);
                 if (NATTEMPTS == 1) { // init=True...
                         return ndir; // and dirs;
                 } else { // init=False...
@@ -1083,6 +1098,8 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
 			 const REAL_T min_signal,
 			 const REAL_T tc_threshold,
 			 const REAL_T step_size,
+			 const REAL_T relative_peak_thres,
+			 const REAL_T min_separation_angle,
                          REAL3_T seed,
                          REAL3_T first_step,
                          REAL3_T voxel_size,
@@ -1144,6 +1161,8 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                                            5>(st,
 					      max_angle,
 					      min_signal,
+					      relative_peak_thres,
+					      min_separation_angle,
                                               direction,
                                               dimx, dimy, dimz, dimt, dataf,
                                               b0s_mask /* !dwi_mask */,
@@ -1210,6 +1229,8 @@ template<int BDIM_X,
          typename REAL3_T>
 __global__ void getNumStreamlines_k(const REAL_T max_angle,
 				    const REAL_T min_signal,
+				    const REAL_T relative_peak_thres,
+				    const REAL_T min_separation_angle,
 				    const long long rndSeed,
                                     const int rndOffset,
                                     const int nseed,
@@ -1264,6 +1285,8 @@ __global__ void getNumStreamlines_k(const REAL_T max_angle,
                                    1>(&st,
 				      max_angle,
 				      min_signal,
+				      relative_peak_thres,
+				      min_separation_angle,
                                       MAKE_REAL3(0,0,0),
                                       dimx, dimy, dimz, dimt, dataf,
                                       b0s_mask /* !dwi_mask */,
@@ -1304,6 +1327,8 @@ __global__ void genStreamlinesMerge_k(const REAL_T max_angle,
 				      const REAL_T min_signal,
 				      const REAL_T tc_threshold,
 				      const REAL_T step_size,
+				      const REAL_T relative_peak_thres,
+				      const REAL_T min_separation_angle,
 				      const long long rndSeed,
                                       const int rndOffset,
                                       const int nseed,
@@ -1386,6 +1411,8 @@ __global__ void genStreamlinesMerge_k(const REAL_T max_angle,
 						            min_signal,
 							    tc_threshold,
 							    step_size,
+							    relative_peak_thres,
+							    min_separation_angle,
                                                             seed,
                                                             MAKE_REAL3(-first_step.x, -first_step.y, -first_step.z),
                                                             MAKE_REAL3(1, 1, 1),
@@ -1423,6 +1450,8 @@ __global__ void genStreamlinesMerge_k(const REAL_T max_angle,
 						            min_signal,
 							    tc_threshold,
 							    step_size,
+							    relative_peak_thres,
+							    min_separation_angle,
                                                             seed,
                                                             first_step,
                                                             MAKE_REAL3(1, 1, 1),
@@ -1466,6 +1495,7 @@ __global__ void genStreamlinesMerge_k(const REAL_T max_angle,
 }
 
 void generate_streamlines_cuda_mgpu(const REAL max_angle, const REAL min_signal, const REAL tc_threshold, const REAL step_size,
+                                    const REAL relative_peak_thresh, const REAL min_separation_angle,
                                     const int nseeds, const std::vector<REAL*> &seeds_d,
                                     const int dimx, const int dimy, const int dimz, const int dimt,
                                     const std::vector<REAL*> &dataf_d, const std::vector<REAL*> &H_d, const std::vector<REAL*> &R_d,
@@ -1517,6 +1547,8 @@ void generate_streamlines_cuda_mgpu(const REAL max_angle, const REAL min_signal,
                         THR_X_BL/THR_X_SL>
                         <<<grid, block, shSizeGNS>>>(max_angle,
 						     min_signal,
+						     relative_peak_thresh,
+						     min_separation_angle,
 						     rng_seed,
 						     rng_offset + n*nseeds_per_gpu,
 						     nseeds_gpu,
@@ -1626,6 +1658,8 @@ void generate_streamlines_cuda_mgpu(const REAL max_angle, const REAL min_signal,
 								   min_signal,
 								   tc_threshold,
 								   step_size,
+								   relative_peak_thresh,
+								   min_separation_angle,
 								   rng_seed,
 								   rng_offset + n*nseeds_per_gpu,
 								   nseeds_gpu,

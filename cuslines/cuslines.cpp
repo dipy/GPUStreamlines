@@ -64,6 +64,8 @@ class GPUTracker {
                double min_signal,
                double tc_threshold,
                double step_size,
+               double relative_peak_thresh,
+               double min_separation_angle,
                np_array_cast dataf,
                np_array H,
                np_array R,
@@ -125,6 +127,8 @@ class GPUTracker {
       min_signal_ = min_signal;
       tc_threshold_ = tc_threshold;
       step_size_ = step_size;
+      relative_peak_thresh_ = relative_peak_thresh,
+      min_separation_angle_ = min_separation_angle,
 
       // Allocate/copy constant problem data on GPUs
       dataf_d.resize(ngpus_, nullptr);
@@ -221,6 +225,7 @@ class GPUTracker {
 
       // Call GPU routine
       generate_streamlines_cuda_mgpu(max_angle_, min_signal_, tc_threshold_, step_size_,
+                                     relative_peak_thresh_, min_separation_angle_,
                                      nseeds, seeds_d,
                                      dimx_, dimy_, dimz_, dimt_,
                                      dataf_d, H_d, R_d, delta_nr_, delta_b_d, delta_q_d, b0s_mask_d, metric_map_d, samplm_nr_, sampling_matrix_d,
@@ -285,6 +290,8 @@ class GPUTracker {
     double tc_threshold_;
     double min_signal_;
     double step_size_;
+    double relative_peak_thresh_;
+    double min_separation_angle_;
 
     std::vector<int> nSlines_old_;
     std::vector<REAL*> slines_;
@@ -309,6 +316,7 @@ class GPUTracker {
 PYBIND11_MODULE(cuslines, m) {
   py::class_<GPUTracker>(m, "GPUTracker")
     .def(py::init<double, double, double, double,
+                  double, double,
 		  np_array_cast, np_array,
                   np_array, np_array,
                   np_array, np_array_int,
@@ -316,6 +324,7 @@ PYBIND11_MODULE(cuslines, m) {
                   np_array, np_array_int,
                   int, int, int>(),
                   py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(),
+                  py::arg().noconvert(), py::arg().noconvert(),
                   py::arg().noconvert(), py::arg().noconvert(),
                   py::arg().noconvert(), py::arg().noconvert(),
                   py::arg().noconvert(), py::arg().noconvert(),
