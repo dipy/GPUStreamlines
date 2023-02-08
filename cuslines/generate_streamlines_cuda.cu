@@ -961,13 +961,13 @@ __device__ int get_direction_d(curandStatePhilox4_32_10_t *st,
 #ifdef USE_FIXED_PERMUTATION
                                         const int srcPermInd = fixedPerm[j+tidx];
 #else
-//                                        const int srcPermInd = curand(st) % hr_side;
+                                        const int srcPermInd = curand(st) % hr_side;
 //                                        if (srcPermInd < 0 || srcPermInd >= hr_side) {
 //                                                printf("srcPermInd: %d\n", srcPermInd);
 //                                        }
 #endif
-					//__h_sh[j+tidx] += __r_sh[srcPermInd];
-					__h_sh[j+tidx] += __r_sh[j+tidx];
+					__h_sh[j+tidx] += __r_sh[srcPermInd];
+					//__h_sh[j+tidx] += __r_sh[j+tidx];
                                 }
                         }
 			__syncwarp(WMASK);
@@ -1315,6 +1315,7 @@ __global__ void getNumStreamlines_k(const int model_type,
 
         const int tidx = threadIdx.x;
         const int slid = blockIdx.x*blockDim.y + threadIdx.y;
+        const size_t gid = blockIdx.x * blockDim.y * blockDim.x + blockDim.x * threadIdx.y + threadIdx.x;
 
         if (slid >= nseed) {
                 return;
@@ -1328,7 +1329,8 @@ __global__ void getNumStreamlines_k(const int model_type,
 	const int hr_side = dimt-1;
 
         curandStatePhilox4_32_10_t st;
-        curand_init(rndSeed, slid + rndOffset, DIV_UP(hr_side, BDIM_X)*tidx, &st); // each thread uses DIV_UP(hr_side/BDIM_X)
+        //curand_init(rndSeed, slid + rndOffset, DIV_UP(hr_side, BDIM_X)*tidx, &st); // each thread uses DIV_UP(hr_side/BDIM_X)
+        curand_init(rndSeed, gid, 0, &st); // each thread uses DIV_UP(hr_side/BDIM_X)
                                                                                    // elements of the same sequence
         // python:
         //directions = get_direction(None, dataf, dwi_mask, sphere, s, H, R, model, max_angle,
@@ -1429,7 +1431,10 @@ __global__ void genStreamlinesMerge_k(const int model_type,
 	const int hr_side = dimt-1;
 
         curandStatePhilox4_32_10_t st;
-        curand_init(rndSeed, slid+rndOffset, DIV_UP(hr_side, BDIM_X)*tidx, &st); // each thread uses DIV_UP(HR_SIDE/BDIM_X)
+        const int gbid = blockIdx.y*gridDim.x + blockIdx.x;
+        const size_t gid = blockIdx.x * blockDim.y * blockDim.x + blockDim.x * threadIdx.y + threadIdx.x;
+        //curand_init(rndSeed, slid+rndOffset, DIV_UP(hr_side, BDIM_X)*tidx, &st); // each thread uses DIV_UP(HR_SIDE/BDIM_X)
+        curand_init(rndSeed, gid+1, 0, &st); // each thread uses DIV_UP(hr_side/BDIM_X)
                                                                                  // elements of the same sequence
         if (slid >= nseed) {
                 return;
