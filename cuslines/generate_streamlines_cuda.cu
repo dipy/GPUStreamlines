@@ -961,12 +961,13 @@ __device__ int get_direction_d(curandStatePhilox4_32_10_t *st,
 #ifdef USE_FIXED_PERMUTATION
                                         const int srcPermInd = fixedPerm[j+tidx];
 #else
-                                        const int srcPermInd = curand(st) % hr_side;
+//                                        const int srcPermInd = curand(st) % hr_side;
 //                                        if (srcPermInd < 0 || srcPermInd >= hr_side) {
 //                                                printf("srcPermInd: %d\n", srcPermInd);
 //                                        }
 #endif
-					__h_sh[j+tidx] += __r_sh[srcPermInd];
+					//__h_sh[j+tidx] += __r_sh[srcPermInd];
+					__h_sh[j+tidx] += __r_sh[j+tidx];
                                 }
                         }
 			__syncwarp(WMASK);
