@@ -58,11 +58,6 @@ py::capsule cleanup(T* ptr) {
          });
 }
 
-enum ModelType {
-  OPDT = 0,
-  CSAODF = 1,
-};
-
 class GPUTracker {
   public:
     GPUTracker(ModelType model_type,

@@ -171,68 +171,6 @@ __device__ int trilinear_interp_d(const int dimx,
 }
 
 template<int BDIM_X,
-         int N,
-         typename VAL_T>
-__device__ void copy_d(      VAL_T *__restrict__ dst,
-                       const VAL_T *__restrict__ src) {
-
-        const int tidx = threadIdx.x;
-
-        #pragma unroll
-        for(int j = 0; j < N; j+= BDIM_X) {
-                if (j+tidx < N) {
-                        dst[j+tidx] = src[j+tidx];
-                }
-        }
-        return;
-}
-
-template<int BDIM_X,
-         int N,
-         int M,
-         typename VAL_T>
-__device__ void ndotp_d(const VAL_T *__restrict__ srcV,
-                        const VAL_T *__restrict__ srcM,
-                              VAL_T *__restrict__ dstV) {
-
-        const int tidx = threadIdx.x;
-
-        const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
-        const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
-
-        //#pragma unroll
-        for(int i = 0; i < N; i++) {
-
-                VAL_T __tmp = 0;
-
-                #pragma unroll
-                for(int j = 0; j < M; j += BDIM_X) {
-                        if (j+tidx < M) {
-                                __tmp += srcV[j+tidx]*srcM[i*M + j+tidx];
-                        }
-                }
-#if 0
-                #pragma unroll
-                for(int j = BDIM_X/2; j; j /= 2) {
-                        __tmp += __shfl_xor_sync(WMASK, __tmp, j, BDIM_X);
-                }
-#else
-                #pragma unroll
-                for(int j = BDIM_X/2; j; j /= 2) {
-                        __tmp += __shfl_down_sync(WMASK, __tmp, j, BDIM_X);
-                }
-#endif
-                // values could be held by BDIM_X threads and written
-                // together every BDIM_X iterations...
-
-                if (tidx == 0) {
-                        dstV[i] = __tmp;
-                }
-        }
-        return;
-}
-
-template<int BDIM_X,
          typename VAL_T>
 __device__ void ndotp_d(const int N,
 			const int M,
@@ -274,54 +212,6 @@ __device__ void ndotp_d(const int N,
         return;
 }
 
-template<int BDIM_X,
-         int N,
-         int M,
-         typename VAL_T>
-__device__ void ndotp_log_d(const VAL_T *__restrict__ srcV,
-                            const VAL_T *__restrict__ srcM,
-                                  VAL_T *__restrict__ dstV) {
-
-        const int tidx = threadIdx.x;
-
-        const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
-         const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
-
-        const VAL_T ONEP5 = static_cast<VAL_T>(1.5);
-
-        //#pragma unroll
-        for(int i = 0; i < N; i++) {
-
-                VAL_T __tmp = 0;
-
-                #pragma unroll
-                for(int j = 0; j < M; j += BDIM_X) {
-                        if (j+tidx < M) {
-
-                                const VAL_T v = srcV[j+tidx];
-                                __tmp += -LOG(v)*(ONEP5+LOG(v))*v * srcM[i*M + j+tidx];
-                        }
-                }
-#if 0
-                #pragma unroll
-                for(int j = BDIM_X/2; j; j /= 2) {
-                        __tmp += __shfl_xor_sync(WMASK, __tmp, j, BDIM_X);
-                }
-#else
-                #pragma unroll
-                for(int j = BDIM_X/2; j; j /= 2) {
-                        __tmp += __shfl_down_sync(WMASK, __tmp, j, BDIM_X);
-                }
-#endif
-                // values could be held by BDIM_X threads and written
-                // together every BDIM_X iterations...
-
-                if (tidx == 0) {
-                        dstV[i] = __tmp;
-                }
-        }
-        return;
-}
 
 template<int BDIM_X,
          typename VAL_T>
@@ -412,6 +302,87 @@ __device__ void ndotp_log_csa_d(const int N,
 		}
 	}
 	return;
+}
+
+template<int BDIM_X,
+         typename REAL_T>
+__device__ void fit_opdt(const int delta_nr,
+                         const int hr_side,
+                         const REAL_T *__restrict__ delta_q,
+                         const REAL_T *__restrict__ delta_b,
+                         const REAL_T *__restrict__ __msk_data_sh,
+                         REAL_T *__restrict__ __h_sh,
+                         REAL_T *__restrict__ __r_sh) {
+        const int tidx = threadIdx.x;
+        const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
+        const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
+
+        ndotp_log_d<BDIM_X>(delta_nr, hr_side, __msk_data_sh, delta_q, __r_sh);
+        ndotp_d    <BDIM_X>(delta_nr, hr_side, __msk_data_sh, delta_b, __h_sh);
+        __syncwarp(WMASK);
+        #pragma unroll
+        for(int j = tidx; j < delta_nr; j += BDIM_X) {
+                __r_sh[j] -= __h_sh[j];
+        }
+        __syncwarp(WMASK);
+}
+
+template<int BDIM_X, typename REAL_T>
+__device__ void fit_csa(const int delta_nr,
+                        const int hr_side,
+                        const REAL_T *__restrict__ fit_matrix,
+                        const REAL_T *__restrict__ __msk_data_sh,
+                        REAL_T *__restrict__ __r_sh) {
+        const int tidx = threadIdx.x;
+        const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
+        const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
+
+        constexpr REAL _n0_const = 0.28209479177387814; // .5 / sqrt(pi)
+        ndotp_log_csa_d<BDIM_X>(delta_nr, hr_side, __msk_data_sh, fit_matrix, __r_sh);
+        __syncwarp(WMASK);
+        if (tidx == 0) {
+                __r_sh[0] = _n0_const;
+        }
+        __syncwarp(WMASK);
+}
+
+// Based on dipy implementation:
+// https://github.com/dipy/dipy/blob/104345de6dcbfd6627552b00d180e53db6c17381/dipy/reconst/csdeconv.py#L573C5-L573C13
+template<int BDIM_X, typename REAL_T>
+__device__ void fit_csa(const int delta_nr,
+                        const int hr_side,
+                        const REAL_T *__restrict__ X,
+                        const REAL_T *__restrict__ B_reg,
+                        const REAL_T *__restrict__ P, // TODO: P can be calculated beforehand
+                        const REAL_T *__restrict__ __msk_data_sh,
+                        REAL_T *__restrict__ __r_sh) {
+        constexpr REAL_T mu = 1e-5;
+        constexpr REAL_T tau = 0.1;
+
+    
+
+}
+
+template<int BDIM_X, typename REAL_T>
+__device__ void fit_model_coef(const ModelType model_type,
+                               const int delta_nr, // delta_nr is number of ODF directions
+                               const int hr_side, // hr_side is number of data directions
+                               const REAL_T *__restrict__ delta_q,
+                               const REAL_T *__restrict__ delta_b, // these are fit matrices the model can use, different for each model
+                               const REAL_T *__restrict__ __msk_data_sh, // __msk_data_sh is the part of the data currently being operated on by this block
+                               REAL_T *__restrict__ __h_sh, // these last two are modifications to the coefficients that will be returned
+                               REAL_T *__restrict__ __r_sh) {
+        switch(model_type) {
+                case 0:
+                        fit_opdt<BDIM_X>(delta_nr, hr_side, delta_q, delta_b, __msk_data_sh, __h_sh, __r_sh);
+                        break;
+                case 1:
+                        fit_csa<BDIM_X>(delta_nr, hr_side, delta_q, __msk_data_sh, __r_sh);
+                        break;
+                default:
+                        printf("FATAL: Invalid Model Type.\n");
+                        break;
+        }
 }
 
 template<int BDIM_X,
@@ -862,7 +833,7 @@ template<int BDIM_X,
          typename REAL_T,
          typename REAL3_T>
 __device__ int get_direction_d(curandStatePhilox4_32_10_t *st,
-			       const int model_type,
+			       const ModelType model_type,
                                const REAL_T max_angle,
 			       const REAL_T min_signal,
 			       const REAL_T relative_peak_thres,
@@ -1009,24 +980,7 @@ __device__ int get_direction_d(curandStatePhilox4_32_10_t *st,
 			maskGet<BDIM_X>(dimt, b0s_mask, __vox_data_sh, __msk_data_sh);
 			__syncwarp(WMASK);
 
-			if (model_type == 0) {
-				ndotp_log_d<BDIM_X>(delta_nr, hr_side, __msk_data_sh, delta_q, __r_sh);
-				ndotp_d    <BDIM_X>(delta_nr, hr_side, __msk_data_sh, delta_b, __h_sh);
-				__syncwarp(WMASK);
-				#pragma unroll
-				for(int j = tidx; j < delta_nr; j += BDIM_X) {
-					__r_sh[j] -= __h_sh[j];
-				}
-				__syncwarp(WMASK);
-			} else if (model_type == 1) {
-				constexpr REAL_T _n0_const = 0.28209479177387814; // .5 / sqrt(pi)
-				ndotp_log_csa_d<BDIM_X>(delta_nr, hr_side, __msk_data_sh, delta_q, __r_sh);
-				__syncwarp(WMASK);
-				if (tidx == 0) {
-					__r_sh[0] = _n0_const;
-				}
-				__syncwarp(WMASK);
-			}
+                        fit_model_coef<BDIM_X>(model_type, delta_nr, hr_side, delta_q, delta_b, __msk_data_sh, __h_sh, __r_sh);
 
                         // __r_sh[tidy] <- python 'coef'
 
@@ -1150,7 +1104,7 @@ template<int BDIM_X,
          typename REAL_T,
          typename REAL3_T>
 __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
-			 const int model_type,
+			 const ModelType model_type,
 			 const REAL_T max_angle,
 			 const REAL_T min_signal,
 			 const REAL_T tc_threshold,
@@ -1285,7 +1239,7 @@ template<int BDIM_X,
          int BDIM_Y,
          typename REAL_T,
          typename REAL3_T>
-__global__ void getNumStreamlines_k(const int model_type,
+__global__ void getNumStreamlines_k(const ModelType model_type,
                                     const REAL_T max_angle,
 				    const REAL_T min_signal,
 				    const REAL_T relative_peak_thres,
@@ -1326,7 +1280,7 @@ __global__ void getNumStreamlines_k(const int model_type,
 
         REAL3_T *__restrict__ __shDir = shDir0+slid*samplm_nr;
 
-	const int hr_side = dimt-1;
+	// const int hr_side = dimt-1;
 
         curandStatePhilox4_32_10_t st;
         //curand_init(rndSeed, slid + rndOffset, DIV_UP(hr_side, BDIM_X)*tidx, &st); // each thread uses DIV_UP(hr_side/BDIM_X)
@@ -1385,7 +1339,7 @@ template<int BDIM_X,
          int BDIM_Y,
          typename REAL_T,
          typename REAL3_T>
-__global__ void genStreamlinesMerge_k(const int model_type,
+__global__ void genStreamlinesMerge_k(const ModelType model_type,
 				      const REAL_T max_angle,
 				      const REAL_T min_signal,
 				      const REAL_T tc_threshold,
@@ -1428,10 +1382,10 @@ __global__ void genStreamlinesMerge_k(const int model_type,
         const int lid = (tidy*BDIM_X + tidx) % 32;
         const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
 
-	const int hr_side = dimt-1;
+	// const int hr_side = dimt-1;
 
         curandStatePhilox4_32_10_t st;
-        const int gbid = blockIdx.y*gridDim.x + blockIdx.x;
+        // const int gbid = blockIdx.y*gridDim.x + blockIdx.x;
         const size_t gid = blockIdx.x * blockDim.y * blockDim.x + blockDim.x * threadIdx.y + threadIdx.x;
         //curand_init(rndSeed, slid+rndOffset, DIV_UP(hr_side, BDIM_X)*tidx, &st); // each thread uses DIV_UP(HR_SIDE/BDIM_X)
         curand_init(rndSeed, gid+1, 0, &st); // each thread uses DIV_UP(hr_side/BDIM_X)
@@ -1562,7 +1516,7 @@ __global__ void genStreamlinesMerge_k(const int model_type,
         return;
 }
 
-void generate_streamlines_cuda_mgpu(const int model_type, const REAL max_angle, const REAL min_signal, const REAL tc_threshold, const REAL step_size,
+void generate_streamlines_cuda_mgpu(const ModelType model_type, const REAL max_angle, const REAL min_signal, const REAL tc_threshold, const REAL step_size,
                                     const REAL relative_peak_thresh, const REAL min_separation_angle,
                                     const int nseeds, const std::vector<REAL*> &seeds_d,
                                     const int dimx, const int dimy, const int dimz, const int dimt,

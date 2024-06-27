@@ -82,4 +82,9 @@
 
 #define DIV_UP(a,b) (((a)+((b)-1))/(b))
 
+enum ModelType {
+  OPDT = 0,
+  CSAODF = 1,
+};
+
 #endif
