@@ -318,6 +318,9 @@ class GPUTracker {
 
 
 PYBIND11_MODULE(cuslines, m) {
+  m.attr("MAX_SLINE_LEN") = py::int_(MAX_SLINE_LEN);
+  m.attr("REAL_SIZE") = py::int_(REAL_SIZE);
+
   py::enum_<ModelType>(m, "ModelType")
     .value("OPDT", OPDT)
     .value("CSA", CSA)
