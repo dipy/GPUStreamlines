@@ -319,7 +319,9 @@ class GPUTracker {
 PYBIND11_MODULE(cuslines, m) {
   py::enum_<ModelType>(m, "ModelType")
     .value("OPDT", OPDT)
-    .value("CSAODF", CSAODF);
+    .value("CSA", CSA)
+    .value("PROB", PROB)
+    .value("CSD", CSD);
 
   py::class_<GPUTracker>(m, "GPUTracker")
     .def(py::init<ModelType, double, double, double, double,

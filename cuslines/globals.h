@@ -82,9 +82,15 @@
 
 #define DIV_UP(a,b) (((a)+((b)-1))/(b))
 
+#if 0
+  #define DEBUG
+#endif
+
 enum ModelType {
   OPDT = 0,
-  CSAODF = 1,
+  CSA = 1,
+  PROB = 2,
+  CSD = 3,
 };
 
 #endif

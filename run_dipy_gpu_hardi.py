@@ -38,10 +38,11 @@ from dipy.io import read_bvals_bvecs
 from dipy.io.stateful_tractogram import Origin, Space, StatefulTractogram
 from dipy.io.streamline import save_tractogram
 from dipy.tracking import utils
-from dipy.core.gradients import gradient_table
+from dipy.core.gradients import gradient_table, unique_bvals_magnitude
 from dipy.data import small_sphere
 #from dipy.direction import BootDirectionGetter
 from dipy.reconst.shm import OpdtModel, CsaOdfModel
+from dipy.reconst.csdeconv import ConstrainedSphericalDeconvModel, auto_response_ssst
 #from dipy.tracking.local import LocalTracking, ThresholdTissueClassifier
 from dipy.reconst import shm
 from dipy.data import get_fnames
@@ -85,7 +86,8 @@ parser.add_argument("--relative-peak-threshold",type=float,default=0.25,help="re
 parser.add_argument("--min-separation-angle",type=float,default=45,help="min separation angle (in degrees)")
 parser.add_argument("--sm-lambda",type=float,default=0.006,help="smoothing lambda")
 parser.add_argument("--sampling-density", type=int, default=3, help="sampling density for seed generation")
-parser.add_argument("--model", type=str, default="opdt", choices=['opdt', 'csaodf'], help="model to use")
+parser.add_argument("--model", type=str, default="opdt", choices=['opdt', 'csa', 'csd'], help="model to use")
+parser.add_argument("--dg", type=str, default="boot", choices=['boot', 'prob'], help="direction getting scheme to use")
 args = parser.parse_args()
 
 # Get Stanford HARDI data
@@ -119,27 +121,59 @@ metric_map = np.asarray(FA, 'float64')
 
 # Create seeds for ROI
 #seed_mask = utils.seeds_from_mask(roi_data, density=sampling_density, affine=img_affine)
-seed_mask = utils.seeds_from_mask(roi_data, density=args.sampling_density, affine=np.eye(4))
-seed_mask = seed_mask[0:args.nseeds]
+# seed_mask = utils.seeds_from_mask(roi_data, density=args.sampling_density, affine=np.eye(4))
+# seed_mask = seed_mask[0:args.nseeds]
+seed_mask = np.asarray(utils.random_seeds_from_mask(
+  roi_data, seeds_count=args.nseeds,
+  seed_count_per_voxel=False,
+  affine=np.eye(4)))
 
 # Setup model
 if args.model == "opdt":
+  model_type = cuslines.ModelType.OPDT
   print("Running OPDT model...")
   model = OpdtModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=args.min_signal)
   fit_matrix = model._fit_matrix
   delta_b, delta_q = fit_matrix
-else:
-  print("Running CSAODF model...")
+elif args.model == "csa":
+  model_type = cuslines.ModelType.CSA
+  print("Running CSA model...")
   model = CsaOdfModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=args.min_signal)
   fit_matrix = model._fit_matrix
   # Unlike OPDT, CSA has a single matrix used for fit_matrix. Populating delta_b and delta_q with necessary values for
   # now.
   delta_b = fit_matrix
   delta_q = fit_matrix
+else:
+  model_type = cuslines.ModelType.CSD
+  print("Running CSD model...")
+  unique_bvals = unique_bvals_magnitude(gtab.bvals)
+  if len(unique_bvals[unique_bvals > 0]) > 1:
+    low_shell_idx = gtab.bvals <= unique_bvals[unique_bvals > 0][0]
+    response_gtab = gradient_table( # reinit as single shell for this CSD
+      gtab.bvals[low_shell_idx],
+      gtab.bvecs[low_shell_idx])
+    data = data[..., low_shell_idx]
+  else:
+    response_gtab = gtab
+  response, _ = auto_response_ssst(
+    response_gtab,
+    data,
+    roi_radii=10,
+    fa_thr=0.7)
+  model = ConstrainedSphericalDeconvModel(gtab, response, sh_order=args.sh_order)
+  # TODO: we shouldnt have to do this, also for CSA, but we populate delta_b, delta_q.
+  # we need to name change delta_b/delta_q and make it possible for them to be None, or something like this
+  delta_b = model._X
+  delta_q = model.B_reg
+
+if args.dg == "prob":
+  model_type = cuslines.ModelType.PROB
+  fit = model.fit(data, mask=(metric_map >= args.fa_threshold))
+  data = fit.odf(small_sphere).clip(min=0)
+  print(data.shape)
 
 # Setup direction getter args
-print('Bootstrap direction getter')
-#boot_dg = BootDirectionGetter.from_data(data, model, max_angle=args.max_angle, sphere=small_sphere, sh_order=args.sh_order, relative_peak_threshold=args.relative_peak_threshold, min_separation_angle=args.min_separation_angle)
 b0s_mask = gtab.b0s_mask
 dwi_mask = ~b0s_mask
 
@@ -168,7 +202,7 @@ nchunks = (seed_mask.shape[0] + global_chunk_size - 1) // global_chunk_size
 
 #streamline_generator = LocalTracking(boot_dg, tissue_classifier, seed_mask, affine=np.eye(4), step_size=args.step_size)
 
-gpu_tracker = cuslines.GPUTracker(cuslines.ModelType.OPDT if args.model == "opdt" else cuslines.ModelType.CSAODF,
+gpu_tracker = cuslines.GPUTracker(model_type,
                                   args.max_angle * np.pi/180,
                                   args.min_signal,
                                   args.fa_threshold,
