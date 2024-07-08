@@ -37,17 +37,16 @@ namespace py = pybind11;
 
 #include <cuda_runtime.h>
 
+// #define USE_NVTX
+
 #include "globals.h"
 #include "cudamacro.h"
 #include "generate_streamlines_cuda.h"
 
 using np_array = py::array_t<REAL>;
-using np_array_bool = py::array_t<bool>;
 using np_array_int = py::array_t<int>;
-using np_array_short = py::array_t<short>;
 
 using np_array_cast = py::array_t<REAL, py::array::c_style | py::array::forcecast>;
-using np_array_short_cast = py::array_t<short, py::array::c_style | py::array::forcecast>;
 using np_array_int_cast = py::array_t<int, py::array::c_style | py::array::forcecast>;
 
 // Handle to cleanup returned host allocations when associated Python object is destroyed
@@ -271,6 +270,9 @@ class GPUTracker {
       auto roi_shape_info = roi_shape.request();
       auto voxel_size_info = voxel_size.request();
       auto vox_to_ras_info = vox_to_ras.request();
+
+      START_RANGE("filewrite", 0);
+
       //#pragma omp parallel for
       for (int n = 0; n < ngpus_; ++n) {
         std::stringstream ss;
@@ -279,6 +281,8 @@ class GPUTracker {
                   voxel_order.c_str(), reinterpret_cast<REAL *>(vox_to_ras_info.ptr), nSlines_old_[n], slinesLen_[n],
                   reinterpret_cast<REAL3 *>(slines_[n]));
       }
+
+      END_RANGE;
     }
 
   private:
@@ -324,17 +328,16 @@ PYBIND11_MODULE(cuslines, m) {
   py::enum_<ModelType>(m, "ModelType")
     .value("OPDT", OPDT)
     .value("CSA", CSA)
-    .value("PROB", PROB)
-    .value("CSD", CSD);
+    .value("PROB", PROB);
 
   py::class_<GPUTracker>(m, "GPUTracker")
     .def(py::init<ModelType, double, double, double, double,
                   double, double,
-		  np_array_cast, np_array,
-                  np_array, np_array,
-                  np_array, np_array_int,
-                  np_array, np_array,
-                  np_array, np_array_int,
+		              np_array_cast, np_array_cast,
+                  np_array_cast, np_array_cast,
+                  np_array_cast, np_array_int_cast,
+                  np_array_cast, np_array_cast,
+                  np_array_cast, np_array_int_cast,
                   int, int, int>(),
                   py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(),
                   py::arg().noconvert(), py::arg().noconvert(),

@@ -70,17 +70,14 @@
 #define MAX_SLINE_LEN	(501)
 #define PMF_THRESHOLD_P	((REAL)0.1)
 
-//#define TC_THRESHOLD_P	((REAL)0.1)
-//#define STEP_SIZE_P	((REAL)0.5)  // only for TRK generation
-//#define MAX_ANGLE_P	((REAL)1.0471975511965976) // 60 deg in radians
-//#define MIN_SIGNAL_P	((REAL)1.0)
-
 #define MAX_SLINES_PER_SEED (10)
 
 #define MIN(x,y) (((x)<(y))?(x):(y))
 #define MAX(x,y) (((x)>(y))?(x):(y))
 
 #define DIV_UP(a,b) (((a)+((b)-1))/(b))
+
+#define EXCESS_ALLOC_FACT 2
 
 #if 0
   #define DEBUG
@@ -90,7 +87,6 @@ enum ModelType {
   OPDT = 0,
   CSA = 1,
   PROB = 2,
-  CSD = 3,
 };
 
 #endif

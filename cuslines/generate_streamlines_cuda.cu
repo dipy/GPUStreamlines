@@ -347,25 +347,6 @@ __device__ void fit_csa(const int delta_nr,
         __syncwarp(WMASK);
 }
 
-// Based on dipy implementation:
-// https://github.com/dipy/dipy/blob/104345de6dcbfd6627552b00d180e53db6c17381/dipy/reconst/csdeconv.py#L573C5-L573C13
-// template<int BDIM_X, typename REAL_T>
-// __device__ void fit_csd(const int delta_nr,
-//                         const int hr_side,
-//                         const REAL_T *__restrict__ __X,
-//                         const REAL_T *__restrict__ B_reg,
-//                         const REAL_T *__restrict__ __msk_data_sh,
-//                         REAL_T *__restrict__ __r_sh) {
-//         constexpr REAL_T mu = 1e-5;
-//         constexpr REAL_T tau = 0.1;
-//         REAL* __P, __z; // TODO: find somewhere to alloc these, or using existing space
-//         nTmuln_d<BDIM_X>(delta_nr, hr_side, __X, __P); // TODO: P can be calculated beforehand
-//         ndotp_d <BDIM_X>(delta_nr, hr_side, __X, __msk_data_sh, __z);
-
-//         // TODO: finish this
-
-// }
-
 template<int BDIM_X, typename REAL_T>
 __device__ void fit_model_coef(const ModelType model_type,
                                const int delta_nr, // delta_nr is number of ODF directions
@@ -862,10 +843,15 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
 	extern REAL_T __shared__ __sh[];
 
 	REAL_T *__pmf_data_sh = reinterpret_cast<REAL_T *>(__sh);
-	int *__shInd = reinterpret_cast<int *>(__pmf_data_sh) + BDIM_Y*n32dimt; // only used if IS_START is 1
+        int *__shInd;
+        if (IS_START) {
+	        __shInd = reinterpret_cast<int *>(__pmf_data_sh + BDIM_Y*n32dimt);
+        }
 
 	__pmf_data_sh += tidy*n32dimt;
-	__shInd += tidy*n32dimt;
+        if (IS_START) {
+	        __shInd += tidy*n32dimt;
+        }
 
         // pmf = self.pmf_gen.get_pmf_c(&point[0], pmf)
         const int rv = trilinear_interp_d<BDIM_X>(dimx, dimy, dimz, dimt, pmf, point, __pmf_data_sh);
@@ -904,7 +890,7 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
         } else {
                 REAL_T __tmp;
                 #ifdef DEBUG
-                        __syncwarp();
+                        __syncwarp(WMASK);
                         if (tidx == 0) {
                                 printArray("__pmf_data_sh initial", 8, samplm_nr, __pmf_data_sh);
                                 printf("absolpmf_thresh %10.8f\n", absolpmf_thresh);
@@ -914,6 +900,7 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                                         printf("ERROR dir %10.8f, %10.8f, %10.8f\n", dir.x, dir.y, dir.z);
                                 }
                         }
+                        __syncwarp(WMASK);
                 #endif
 
                 // // These should not be relevant
@@ -943,10 +930,11 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                 __syncwarp(WMASK);
 
                 #ifdef DEBUG
-                        __syncwarp();
+                        __syncwarp(WMASK);
                         if (tidx == 0) {
                                 printArray("__pmf_data_sh after filtering", 8, samplm_nr, __pmf_data_sh);
                         }
+                        __syncwarp(WMASK);
                 #endif
 
                 // cumsum(pmf, pmf, _len)
@@ -956,33 +944,29 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                         }
                         __syncwarp(WMASK);
 
-                        #pragma unroll
-                        for(int i = 1; i < BDIM_X; i *= 2) {
+                        REAL_T __t_pmf = __pmf_data_sh[j+tidx];
+                        for (int i = 1; i < BDIM_X; i*=2) {
+                                __tmp = __shfl_up_sync(WMASK, __t_pmf, i, BDIM_X);
                                 if ((tidx >= i) && (j+tidx < samplm_nr)) {
-                                        __tmp = __pmf_data_sh[j+tidx-i];
+                                        __t_pmf += __tmp;
                                 }
-                                __syncwarp(WMASK);
-                                if ((tidx >= i) && (j+tidx < samplm_nr)) {
-                                        __pmf_data_sh[j+tidx] += __tmp;
-                                }
-                                __syncwarp(WMASK);
                         }
+                        __pmf_data_sh[j+tidx] = __t_pmf;
+                        __syncwarp(WMASK);
                 }
 
                 #ifdef DEBUG
-                        __syncwarp();
+                        __syncwarp(WMASK);
                         if (tidx == 0) {
                                 printArray("__pmf_data_sh after cumsum", 8, samplm_nr, __pmf_data_sh);
                         }
+                        __syncwarp(WMASK);
                 #endif
 
                 // last_cdf = pmf[_len - 1]
                 // if last_cdf == 0:
                 //         return 1
-                if (tidx == 0) {
-                        __tmp = __pmf_data_sh[samplm_nr - 1];
-                }
-                REAL_T last_cdf = __shfl_sync(WMASK, __tmp, 0, BDIM_X);
+                REAL_T last_cdf = __pmf_data_sh[samplm_nr - 1];
                 if (last_cdf == 0) {
                         return 0;
                 }
@@ -992,31 +976,24 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                         __tmp = curand_uniform(st) * last_cdf;
                 }
                 REAL_T selected_cdf = __shfl_sync(WMASK, __tmp, 0, BDIM_X);
-                int indProb = samplm_nr;
-                for(int i = samplm_nr - 1 - tidx; i >= 0; i-= BDIM_X) {
-                        if (selected_cdf >= __pmf_data_sh[i]) {
-                                if ((i < samplm_nr) && (selected_cdf < __pmf_data_sh[i + 1])) {
-                                        indProb = i + 1;
-                                } else {
-                                        indProb = MIN(samplm_nr - 1, i + BDIM_X);
-                                }
+
+                int indProb = samplm_nr - 1;
+                for (int ii = 0; ii < samplm_nr; ii+=BDIM_X) {
+                        int __msk = __ballot_sync(WMASK, selected_cdf < __pmf_data_sh[ii+tidx]);
+                        if (__msk != 0) {
+                                indProb = ii + __ffs(__msk) - 1;
                                 break;
                         }
                 }
 
-                #pragma unroll
-                for(int i = BDIM_X/2; i; i /= 2) {
-                        __tmp = __shfl_xor_sync(WMASK, indProb, i, BDIM_X);
-                        indProb = MIN(indProb, __tmp);
-                }
-
                 #ifdef DEBUG
-                        __syncwarp();
+                        __syncwarp(WMASK);
                         if (tidx == 0) {
                                 printf("last_cdf %10.8f\n", last_cdf);
                                 printf("selected_cdf %10.8f\n", selected_cdf);
                                 printf("indProb %i out of %i\n", indProb, samplm_nr);
                         }
+                        __syncwarp(WMASK);
                 #endif
 
                 // newdir = self.vertices[idx]
@@ -1826,9 +1803,13 @@ void generate_streamlines_cuda_mgpu(const ModelType model_type, const REAL max_a
 
   int n32dimt = ((dimt+31)/32)*32;
 
-  size_t shSizeGNS = sizeof(REAL)*(THR_X_BL/THR_X_SL)*(2*n32dimt + 2*MAX(n32dimt, samplm_nr)) + // for get_direction_boot_d
-		     sizeof(int)*samplm_nr;						        // for peak_directions_d	
-
+  size_t shSizeGNS;
+  if (model_type == PROB) {
+    shSizeGNS = sizeof(REAL)*(THR_X_BL/THR_X_SL)*n32dimt + sizeof(int)*(THR_X_BL/THR_X_SL)*n32dimt;
+  } else {
+    shSizeGNS = sizeof(REAL)*(THR_X_BL/THR_X_SL)*(2*n32dimt + 2*MAX(n32dimt, samplm_nr)) + // for get_direction_boot_d
+                sizeof(int)*samplm_nr;						        // for peak_directions_d	
+  }
   //printf("shSizeGNS: %zu\n", shSizeGNS);
 
   //#pragma omp parallel for
@@ -1905,15 +1886,19 @@ void generate_streamlines_cuda_mgpu(const ModelType model_type, const REAL max_a
     CHECK_CUDA(cudaMemset(slineSeed_d[n], -1, sizeof(*slineSeed_d[n])*nSlines_h[n]));
 
     // Allocate/reallocate output arrays if necessary
-    if (nSlines_h[n] > nSlines_old_h[n]) {
+    if (nSlines_h[n] > EXCESS_ALLOC_FACT*nSlines_old_h[n]) {
       if(slines_h[n]) cudaFreeHost(slines_h[n]);
       if(slinesLen_h[n]) cudaFreeHost(slinesLen_h[n]);
       slines_h[n] = nullptr;
       slinesLen_h[n] = nullptr;
     }
 
-    if (!slines_h[n]) CHECK_CUDA(cudaMallocHost(&slines_h[n], 2*3*MAX_SLINE_LEN*nSlines_h[n]*sizeof(*slines_h[n])));
-    if (!slinesLen_h[n]) CHECK_CUDA(cudaMallocHost(&slinesLen_h[n], nSlines_h[n]*sizeof(*slinesLen_h[n])));
+#ifdef DEBUG
+    printf("buffer size %zu\n", sizeof(*slines_h[n])*EXCESS_ALLOC_FACT*2*3*MAX_SLINE_LEN*nSlines_h[n]);
+#endif
+
+    if (!slines_h[n]) CHECK_CUDA(cudaMallocHost(&slines_h[n], sizeof(*slines_h[n])*EXCESS_ALLOC_FACT*2*3*MAX_SLINE_LEN*nSlines_h[n]));
+    if (!slinesLen_h[n]) CHECK_CUDA(cudaMallocHost(&slinesLen_h[n], sizeof(*slinesLen_h[n])*EXCESS_ALLOC_FACT*nSlines_h[n]));
   }
 
   //if (nSlines_h) {
@@ -1949,6 +1934,13 @@ void generate_streamlines_cuda_mgpu(const ModelType model_type, const REAL max_a
     std::cerr << "GPU " << n << ": ";
     std::cerr << "Generating " << nSlines_h[n] << " streamlines (from " << nseeds_gpu << " seeds)" << std::endl; 
 #endif
+
+    if (model_type == PROB) {
+        // Shared memory requirements are smaller for probabilistic for main run
+        // than for preliminary run
+        shSizeGNS = sizeof(REAL)*(THR_X_BL/THR_X_SL)*n32dimt; 
+    }
+
     //fprintf(stderr, "Launching kernel with %u blocks of size (%u, %u)\n", grid.x, block.x, block.y);
     genStreamlinesMerge_k<THR_X_SL,
                           THR_X_BL/THR_X_SL>
