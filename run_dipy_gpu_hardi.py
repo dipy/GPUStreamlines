@@ -30,7 +30,6 @@
 import argparse
 import random
 import time
-import subprocess
 
 import numpy as np
 
@@ -74,7 +73,7 @@ def get_img(ep2_seq):
 print("parsing arguments")
 parser = argparse.ArgumentParser()
 parser.add_argument("--output-prefix", type=str, default ='', help="path to the output file")
-parser.add_argument("--chunk-size", type=int, default=None, help="how many seeds to process per sweep, per GPU. If None, will estimate based on free memory in GPU0")
+parser.add_argument("--chunk-size", type=int, default=100000, help="how many seeds to process per sweep, per GPU.")
 parser.add_argument("--nseeds", type=int, default=None, help="how many seeds to process in total")
 parser.add_argument("--ngpus", type=int, required=True, help="number of GPUs to use")
 parser.add_argument("--use-fast-write", action='store_true', help="use fast file write")
@@ -197,31 +196,8 @@ R = shm.lcr_matrix(H)
 # create floating point copy of data
 dataf = np.asarray(data, dtype=float)
 
-if args.chunk_size is None: # TODO: I think we will ultimately remove chunks altogether
-  try:
-    result = subprocess.run(
-      ['nvidia-smi', '--query-gpu=memory.free', '--format=csv,nounits,noheader', f'--id=0'], 
-      stdout=subprocess.PIPE, 
-      stderr=subprocess.PIPE, 
-      text=True)
-    if result.returncode != 0:
-      raise RuntimeError(f"Error: {result.stderr.strip()}")
-
-    free_memory = int(result.stdout.strip().split('\n')[0]) # This is in MB
-
-    chunk_size = free_memory * (1024.0 / (5 * cuslines.MAX_SLINE_LEN)) * (1024.0 / (3 * cuslines.REAL_SIZE))
-    chunk_size /= 2 # Allow for to 50% of GPU memory can be used for stuff other than storing streamlines
-    chunk_size = int((chunk_size // 1000) * 1000)
-
-    print(f"Chunk size estimated at {chunk_size}")
-  except Exception as e:
-    chunk_size = 100000
-    print("Failed to use nvidia-smi to estimate chunk size, using 100,000: " + str(e))
-else:
-  chunk_size = args.chunk_size
-
 print('streamline gen')
-global_chunk_size = chunk_size * args.ngpus
+global_chunk_size = args.chunk_size * args.ngpus
 nchunks = (seed_mask.shape[0] + global_chunk_size - 1) // global_chunk_size
 
 #streamline_generator = LocalTracking(boot_dg, tissue_classifier, seed_mask, affine=np.eye(4), step_size=args.step_size)
