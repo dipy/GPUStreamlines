@@ -26,7 +26,6 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-# CUDA_HOME=/opt/nvidia/hpc_sdk/Linux_x86_64/23.9/cuda/12.2
 CUDA_HOME=/usr/local/cuda
 CUDACC=$(CUDA_HOME)/bin/nvcc
 CXX=g++
@@ -44,7 +43,7 @@ LDFLAGS= -shared -fopenmp -L$(CUDA_HOME)/lib64 -lcudart -lnvToolsExt
 all: cuslines
 
 cuslines: generate_streamlines_cuda.o cuslines.o
-	$(LD) generate_streamlines_cuda.o cuslines.o -o cuslines`python3-config --extension-suffix` $(LDFLAGS)
+	$(LD) -shared cuslines.o generate_streamlines_cuda.o cuslines`python3-config --extension-suffix` $(LDFLAGS)
 
 %.o : %.cu
 	$(CUDACC) $(CUDACFLAGS) $< -o $@
