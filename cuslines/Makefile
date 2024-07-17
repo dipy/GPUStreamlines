@@ -43,7 +43,7 @@ LDFLAGS= -shared -fopenmp -L$(CUDA_HOME)/lib64 -lcudart -lnvToolsExt
 all: cuslines
 
 cuslines: generate_streamlines_cuda.o cuslines.o
-	$(LD) -shared cuslines.o generate_streamlines_cuda.o cuslines`python3-config --extension-suffix` $(LDFLAGS)
+	$(LD) cuslines.o generate_streamlines_cuda.o -o cuslines`python3-config --extension-suffix` $(LDFLAGS)
 
 %.o : %.cu
 	$(CUDACC) $(CUDACFLAGS) $< -o $@
