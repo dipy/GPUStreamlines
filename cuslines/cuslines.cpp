@@ -328,7 +328,8 @@ PYBIND11_MODULE(cuslines, m) {
   py::enum_<ModelType>(m, "ModelType")
     .value("OPDT", OPDT)
     .value("CSA", CSA)
-    .value("PROB", PROB);
+    .value("PROB", PROB)
+    .value("PTT", PTT);
 
   py::class_<GPUTracker>(m, "GPUTracker")
     .def(py::init<ModelType, double, double, double, double,

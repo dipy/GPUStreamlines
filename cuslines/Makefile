@@ -26,6 +26,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
+# CUDA_HOME=/opt/nvidia/hpc_sdk/Linux_x86_64/23.9/cuda/12.2
 CUDA_HOME=/usr/local/cuda
 CUDACC=$(CUDA_HOME)/bin/nvcc
 CXX=g++
@@ -38,17 +39,18 @@ CUDA_ARCH = $(foreach SM,$(SMS),-gencode arch=compute_$(SM),code=sm_$(SM))
 LASTSM := $(lastword $(sort $(SMS)))
 CUDA_ARCH += -gencode arch=compute_$(LASTSM),code=compute_$(LASTSM)
 CUDACFLAGS=-c -O3 -lineinfo -Xptxas=-v -std=c++11 -Xcompiler -fPIC -Xcompiler=-fopenmp $(CUDA_ARCH)
+LDFLAGS= -shared -fopenmp -L$(CUDA_HOME)/lib64 -lcudart -lnvToolsExt
 
 all: cuslines
 
 cuslines: generate_streamlines_cuda.o cuslines.o
-	$(LD) -shared cuslines.o generate_streamlines_cuda.o -o cuslines`python3-config --extension-suffix` -fopenmp -L$(CUDA_HOME)/lib64 -lcudart
+	$(LD) generate_streamlines_cuda.o cuslines.o -o cuslines`python3-config --extension-suffix` $(LDFLAGS)
 
-%.o: %.cu
-	$(CUDACC) $(CUDACFLAGS) $<
+%.o : %.cu
+	$(CUDACC) $(CUDACFLAGS) $< -o $@
 
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) $< -o $@
 
 clean:
-	rm *.o cuslines`python3-config --extension-suffix`
+	rm *.o cuslines`python3-config --extension-suffix` __pycache__/*.pyc
