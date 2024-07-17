@@ -1,6 +1,6 @@
 template<typename REAL_T>
 __device__ void norm3_d(REAL_T *num, int fail_ind) {
-    REAL_T scale = sqrt(num[0] * num[0] + num[1] * num[1] + num[2] * num[2]);
+    REAL_T scale = SQRT(num[0] * num[0] + num[1] * num[1] + num[2] * num[2]);
 
     if (scale != 0) {
         num[0] /= scale;
@@ -68,16 +68,20 @@ __device__ void prepare_propagator_d(REAL_T k1, REAL_T k2, REAL_T arclength,
         if (FABS(k2) < K_SMALL) {
             k2 = K_SMALL;
         }
-        REAL_T tmp_arclength = arclength * arclength / 2.0;
-        propagator[0] = arclength;
-        propagator[1] = k1 * tmp_arclength;
-        propagator[2] = k2 * tmp_arclength;
-        propagator[3] = (1 - k2 * k2 * tmp_arclength) - k1 * k1 * tmp_arclength;
-        propagator[4] = k1 * arclength;
-        propagator[5] = k2 * arclength;
-        propagator[6] = -k2 * arclength;
-        propagator[7] = -k1 * k2 * tmp_arclength;
-        propagator[8] = 1 - k2 * k2 * tmp_arclength;
+        REAL_T k     = SQRT(k1*k1+k2*k2);
+        REAL_T sinkt = SIN(k*arclength);
+        REAL_T coskt = COS(k*arclength);
+        REAL_T kk    = 1/(k*k);
+
+        propagator[0] = sinkt/k;
+        propagator[1] = k1*(1-coskt)*kk;
+        propagator[2] = k2*(1-coskt)*kk;
+        propagator[3] = coskt;
+        propagator[4] = k1*sinkt/k;
+        propagator[5] = k2*sinkt/k;
+        propagator[6] = -propagator[5];
+        propagator[7] = k1*k2*(coskt-1)*kk;
+        propagator[8] = (k1*k1+k2*k2*coskt)*kk;
     }
 }
 
@@ -107,26 +111,31 @@ __device__ void get_probing_frame_d(const REAL_T* frame, curandStatePhilox4_32_1
     }
 }
 
-template<typename REAL_T, typename REAL3_T>
-__device__ void propogate_frame_d(REAL_T* propagator, REAL_T* frame, REAL3_T* pos, REAL3_T pos_scale) {
+template<typename REAL_T>
+__device__ void propogate_frame_d(REAL_T* propagator, REAL_T* frame, REAL_T* direc) {
     REAL_T __tmp[3];
 
-    pos->x += pos_scale.x*(propagator[0]*frame[0] + propagator[1]*frame[3] + propagator[2]*frame[6]);
-    pos->y += pos_scale.y*(propagator[0]*frame[1] + propagator[1]*frame[4] + propagator[2]*frame[7]);
-    pos->z += pos_scale.z*(propagator[0]*frame[2] + propagator[1]*frame[5] + propagator[2]*frame[8]);
-
     for (int ii = 0; ii < 3; ii++) {
-        __tmp[ii] = propagator[3]*frame[ii] + propagator[4]*frame[3+ii] + propagator[5]*frame[6+ii];
+        direc[ii]       = propagator[0]*frame[ii] + propagator[1]*frame[3+ii] + propagator[2]*frame[6+ii];
+        __tmp[ii]       = propagator[3]*frame[ii] + propagator[4]*frame[3+ii] + propagator[5]*frame[6+ii];
         frame[2*3 + ii] = propagator[6]*frame[ii] + propagator[7]*frame[3+ii] + propagator[8]*frame[6+ii];
     }
 
+#if 1
+    norm3_d(__tmp, 0); // normalize tangent
+    crossnorm3_d(frame + 3, frame + 2*3, __tmp, 1); // calc normal
+    crossnorm3_d(frame + 2*3, __tmp, frame + 3, 2); // calculate binorm from tangent, norm
+#else
     norm3_d(__tmp, 0); // normalize tangent
     norm3_d(frame + 2*3, 2); // normalize binorm
     crossnorm3_d(frame + 3, frame + 2*3, __tmp, 1); // calculate normal from binorm, tangent
+#endif
 
     for (int ii = 0; ii < 3; ii++) {
         frame[ii] = __tmp[ii];
     }
+
+    norm3_d(direc, 0);
 }
 
 template<typename REAL_T, typename REAL3_T>
@@ -139,14 +148,22 @@ __device__ REAL_T calculate_data_support_d(REAL_T support,
                                            REAL_T* probing_frame,
                                            REAL_T* last_val_probe) {
     REAL_T probing_prop[9];
+    REAL_T direc[3];
     REAL3_T probing_pos;
     REAL_T fod_amp;
 
     prepare_propagator_d(k1, k2, PROBE_STEP, probing_prop);
-    probing_pos.x = pos.x; probing_pos.y = pos.y; probing_pos.z = pos.z;
+    probing_pos.x = pos.x;
+    probing_pos.y = pos.y;
+    probing_pos.z = pos.z;
 
     for (int ii = 0; ii < PROBE_QUALITY; ii++) {
-        propogate_frame_d(probing_prop, probing_frame, &probing_pos, voxel_size);
+        propogate_frame_d(probing_prop, probing_frame, direc);
+
+        probing_pos.x += direc[0] * voxel_size.x;
+        probing_pos.y += direc[1] * voxel_size.y;
+        probing_pos.z += direc[2] * voxel_size.z;
+
         fod_amp = interp4_d(probing_pos, probing_frame, pmf,
                             dimx, dimy, dimz, dimt,
                             odf_sphere_vertices);
@@ -160,6 +177,7 @@ __device__ REAL_T calculate_data_support_d(REAL_T support,
         }
         support += fod_amp;
     }
+
     *last_val_probe = fod_amp;
 
     return support;
@@ -198,16 +216,16 @@ __device__ int get_direction_ptt_d(
 	extern REAL_T __shared__ __sh[];
 
     REAL_T *__face_cdf_sh = reinterpret_cast<REAL_T *>(__sh);
-    REAL_T *__vert_cdf_sh = __face_cdf_sh + BDIM_Y*DISC_FACE_CNT; // These first two can be overwritten in other functions
-    REAL_T *__frame_sh = __vert_cdf_sh + BDIM_Y*DISC_VERT_CNT; // the rest must persist form call to call
+    REAL_T *__vert_pdf_sh = __face_cdf_sh + BDIM_Y*DISC_FACE_CNT; // These first two can be overwritten in other functions
+    REAL_T *__frame_sh = __vert_pdf_sh + BDIM_Y*DISC_VERT_CNT; // the rest must persist form call to call
     REAL_T *__last_val_sh = __frame_sh + BDIM_Y*9;
 
     __face_cdf_sh += tidy*DISC_FACE_CNT;
-    __vert_cdf_sh += tidy*DISC_VERT_CNT; 
+    __vert_pdf_sh += tidy*DISC_VERT_CNT; 
     __frame_sh += tidy*9;
     __last_val_sh += tidy*1;
 
-    const REAL_T max_curvature = (step_size / 2.0) / (SIN(max_angle / 2));
+    const REAL_T max_curvature = (step_size / 2) / (SIN(max_angle / 2));
     REAL_T __tmp;
 
     if (IS_INIT) {
@@ -222,7 +240,7 @@ __device__ int get_direction_ptt_d(
     }
     __syncwarp(WMASK);
 
-    // Calculate __vert_cdf_sh
+    // Calculate __vert_pdf_sh
     REAL_T probing_frame[9];
     REAL_T k1_probe, k2_probe;
     bool support_found = 0;
@@ -231,11 +249,6 @@ __device__ int get_direction_ptt_d(
         for (int ii = tidx; ii < DISC_VERT_CNT; ii += BDIM_X) {
             k1_probe = DISC_VERT[ii*2] * max_curvature;
             k2_probe = DISC_VERT[ii*2+1] * max_curvature;
-
-#if 0
-            printf("k1_probe: %f for id: %i\n", k1_probe, tidx);
-            printf("k2_probe: %f for id: %i\n", k2_probe, tidx);
-#endif
 
             get_probing_frame_d<IS_INIT>(__frame_sh, st, probing_frame);
 
@@ -246,10 +259,17 @@ __device__ int get_direction_ptt_d(
                                                            k1_probe, k2_probe,
                                                            probing_frame,
                                                            &__tmp);
+
+#if 0
+            if (threadIdx.y == 1 && ii == 0) { 
+                printf("    k1_probe: %f, k2_probe %f, support %f for id: %i\n", k1_probe, k2_probe, this_support, tidx);
+            }
+#endif
+
             if (this_support < NORM_MIN_SUPPORT) {
-                __vert_cdf_sh[ii] = 0;
+                __vert_pdf_sh[ii] = 0;
             } else {
-                __vert_cdf_sh[ii] = this_support;
+                __vert_pdf_sh[ii] = this_support;
                 support_found = 1;
             }
         }
@@ -261,8 +281,8 @@ __device__ int get_direction_ptt_d(
 
 #if 0
     __syncwarp(WMASK);
-    if (threadIdx.x == 0) {
-        printArrayAlways("VERT PDF", 8, DISC_VERT_CNT, __vert_cdf_sh);
+    if (threadIdx.y == 1 && threadIdx.x == 0) {
+        printArrayAlways("VERT PDF", 8, DISC_VERT_CNT, __vert_pdf_sh);
     }
     __syncwarp(WMASK);
 #endif
@@ -277,7 +297,7 @@ __device__ int get_direction_ptt_d(
     for (int ii = tidx; ii < DISC_FACE_CNT; ii+=BDIM_X) {
         bool all_verts_valid = 1;
         for (int jj = 0; jj < 3; jj++) {
-            REAL_T vert_val = __vert_cdf_sh[DISC_FACE[ii*3 + jj]];
+            REAL_T vert_val = __vert_pdf_sh[DISC_FACE[ii*3 + jj]];
             if (vert_val == 0) {
                 all_verts_valid = IS_INIT;
             }
@@ -291,7 +311,7 @@ __device__ int get_direction_ptt_d(
 
 #if 0
     __syncwarp(WMASK);
-    if (threadIdx.x == 0) {
+    if (threadIdx.y == 1 && threadIdx.x == 0) {
         printArrayAlways("Face PDF", 8, DISC_FACE_CNT, __face_cdf_sh);
     }
     __syncwarp(WMASK);
@@ -307,7 +327,7 @@ __device__ int get_direction_ptt_d(
 
 #if 0
     __syncwarp(WMASK);
-    if (threadIdx.x == 0) {
+    if (threadIdx.y == 1 && threadIdx.x == 0) {
         printArrayAlways("Face CDF", 8, DISC_FACE_CNT, __face_cdf_sh);
     }
     __syncwarp(WMASK);
@@ -357,15 +377,14 @@ __device__ int get_direction_ptt_d(
 
             __syncwarp(WMASK);
             if (tidx == winning_lane) {
-                dirs[0] = MAKE_REAL3(
-                    probing_frame[0],
-                    probing_frame[1],
-                    probing_frame[2]);
-
-                if (!IS_INIT) {
+                if (IS_INIT) {
+                    dirs[0] = dir;
+                } else {
                     REAL_T __prop[9];
-                    prepare_propagator_d(k1_probe, k2_probe, step_size, __prop);
-                    propogate_frame_d(__prop, probing_frame, &pos, MAKE_REAL3(0, 0, 0));
+                    REAL_T __dir[3];
+                    prepare_propagator_d(k1_probe, k2_probe, step_size*STEP_FRAC, __prop);
+                    propogate_frame_d(__prop, probing_frame, __dir);
+                    dirs[0] = (REAL3_T) {__dir[0], __dir[1], __dir[2]};
                 }
 
                 for (int jj = 0; jj < 9; jj++) {

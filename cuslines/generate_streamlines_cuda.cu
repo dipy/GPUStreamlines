@@ -1252,8 +1252,15 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
         }
         __syncwarp(WMASK);
 
+        int step_frac;
+        if (model_type == PTT) {
+                step_frac = STEP_FRAC; 
+        } else {
+                step_frac = 1; // STEP_FRAC could be useful in other models
+        }
+
         int i;
-        for(i = 1; i < MAX_SLINE_LEN; i++) {
+        for(i = 1; i < MAX_SLINE_LEN*step_frac; i++) {
                 int ndir;
                 if (model_type == PROB) {
                         ndir = get_direction_prob_d<BDIM_X,
@@ -1330,12 +1337,12 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                 //point.x += (direction.x / voxel_size.x) * STEP_SIZE_P;
                 //point.y += (direction.y / voxel_size.y) * STEP_SIZE_P;
                 //point.z += (direction.z / voxel_size.z) * STEP_SIZE_P;
-                point.x += (direction.x / voxel_size.x) * step_size;
-                point.y += (direction.y / voxel_size.y) * step_size;
-                point.z += (direction.z / voxel_size.z) * step_size;
+                point.x += (direction.x / voxel_size.x) * (step_size / step_frac);
+                point.y += (direction.y / voxel_size.y) * (step_size / step_frac);
+                point.z += (direction.z / voxel_size.z) * (step_size / step_frac);
 
-                if (tidx == 0) {
-                        streamline[i] = point;
+                if ((tidx == 0) && ((i % step_frac) == 0)){
+                        streamline[i/step_frac] = point;
 #if 0
                         if (threadIdx.y == 1) {
                                 printf("streamline[%d]: %f, %f, %f\n", i, point.x, point.y, point.z);
@@ -1352,7 +1359,13 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                         break;
                 }
         }
-        nsteps[0] = i;
+        nsteps[0] = i/step_frac;
+        if (((i % step_frac) != 0) && i < step_frac*(MAX_SLINE_LEN - 1)){
+                nsteps[0]++;
+                if (tidx == 0) {
+                        streamline[nsteps[0]] = point;
+                }
+        }
 
         return tissue_class;
 }
@@ -1619,7 +1632,7 @@ __global__ void genStreamlinesMerge_k(const ModelType model_type,
                                 }
                         }
                         if (tidx == 0) {
-                                // We need to save the frames/k1/k2 for the forwards step, and reverse them for the backwards step
+                                // We need to save the frames for the forwards step, and reverse them for the backwards step
                                 REAL_T *sh_ptr = reinterpret_cast<REAL_T *>(__sh) + BDIM_Y*(DISC_VERT_CNT + DISC_FACE_CNT);
                                 REAL_T *sh_ptr_to_save = reinterpret_cast<REAL_T *>(__sh) + BDIM_Y*(DISC_VERT_CNT + DISC_FACE_CNT + 9 + 1);
                 
@@ -2123,6 +2136,7 @@ void write_trk(const char *fname,
         float slineData[1 + 3*(2*MAX_SLINE_LEN)];
 #endif
         for(int i = 0; i < nsline; i++) {
+                printf("len %i\n", slineLen[i]);
                 reinterpret_cast<int *>(slineData)[0] = slineLen[i];
                 for(int j = 0; j < slineLen[i]; j++) {
                         slineData[1+3*j+0] = (float)((sline[i*2*MAX_SLINE_LEN + j].x+0.5)*VOXEL_SIZE[0]);
