@@ -4,13 +4,14 @@
 #include "disc.h"
 #include "globals.h"
 
-#define STEP_FRAC 1 // divides output step size (usually 0.5) into this many steps
+#define STEP_FRAC 20 // divides output step size (usually 0.5) into this many steps
 #define PROBE_LENGTH 0.25
 #define PROBE_QUALITY 4 // can be 4-7
 #define ALLOW_WEAK_LINK 1
 #define TRIES_PER_REJECTION_SAMPLING 1024
 #define DEFAULT_PTT_MINDATASUPPORT 0.05
 #define K_SMALL 0.0001
+#define PURE_PROBABILISTIC 0
 
 
 #define NORM_MIN_SUPPORT (DEFAULT_PTT_MINDATASUPPORT / PROBE_QUALITY)

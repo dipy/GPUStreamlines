@@ -1,6 +1,6 @@
 template<typename REAL_T>
 __device__ void norm3_d(REAL_T *num, int fail_ind) {
-    REAL_T scale = SQRT(num[0] * num[0] + num[1] * num[1] + num[2] * num[2]);
+    const REAL_T scale = SQRT(num[0] * num[0] + num[1] * num[1] + num[2] * num[2]);
 
     if (scale != 0) {
         num[0] /= scale;
@@ -41,6 +41,11 @@ __device__ REAL_T interp4_d(const REAL3_T pos, const REAL_T* frame, const REAL_T
 
     const int rv = trilinear_interp_d<1>(dimx, dimy, dimz, dimt, closest_odf_idx,
                                          pmf, pos, &__tmp);
+
+#if 0
+    printf("inerpolated %f at %f, %f, %f, %i\n", __tmp, pos.x, pos.y, pos.z, closest_odf_idx);
+#endif
+
     if (rv != 0) {
         return -1;
     } else {
@@ -68,10 +73,10 @@ __device__ void prepare_propagator_d(REAL_T k1, REAL_T k2, REAL_T arclength,
         if (FABS(k2) < K_SMALL) {
             k2 = K_SMALL;
         }
-        REAL_T k     = SQRT(k1*k1+k2*k2);
-        REAL_T sinkt = SIN(k*arclength);
-        REAL_T coskt = COS(k*arclength);
-        REAL_T kk    = 1/(k*k);
+        const REAL_T k     = SQRT(k1*k1+k2*k2);
+        const REAL_T sinkt = SIN(k*arclength);
+        const REAL_T coskt = COS(k*arclength);
+        const REAL_T kk    = 1/(k*k);
 
         propagator[0] = sinkt/k;
         propagator[1] = k1*(1-coskt)*kk;
@@ -225,7 +230,8 @@ __device__ int get_direction_ptt_d(
     __frame_sh += tidy*9;
     __last_val_sh += tidy*1;
 
-    const REAL_T max_curvature = (step_size / 2) / (SIN(max_angle / 2));
+    const REAL_T max_curvature = SIN(max_angle / 2) / (step_size * 2); // bigger numbers means wiggle more
+
     REAL_T __tmp;
 
     if (IS_INIT) {
@@ -274,7 +280,7 @@ __device__ int get_direction_ptt_d(
             }
         }
         if (IS_INIT) {
-            int __msk = __ballot_sync(WMASK, support_found);
+            const int __msk = __ballot_sync(WMASK, support_found);
             support_found = (__msk != 0);
         }
     } while (IS_INIT && (!support_found) && (jj++ < TRIES_PER_REJECTION_SAMPLING));
@@ -335,7 +341,7 @@ __device__ int get_direction_ptt_d(
 
     // Sample random valid faces randomly
     REAL_T r1, r2;
-    for (int ii = tidx; ii < TRIES_PER_REJECTION_SAMPLING; ii += BDIM_X) {
+    for (int ii = 0; ii < TRIES_PER_REJECTION_SAMPLING / BDIM_X; ii++) {
         r1 = curand_uniform(st);
         r2 = curand_uniform(st);
 		if (r1 + r2 > 1) {
@@ -350,39 +356,57 @@ __device__ int get_direction_ptt_d(
 				break;
 		}
  
-        REAL_T vx0 = max_curvature * DISC_VERT[DISC_FACE[jj*3]*2];
-        REAL_T vx1 = max_curvature * DISC_VERT[DISC_FACE[jj*3+1]*2];
-        REAL_T vx2 = max_curvature * DISC_VERT[DISC_FACE[jj*3+2]*2];
+        const REAL_T vx0 = max_curvature * DISC_VERT[DISC_FACE[jj*3]*2];
+        const REAL_T vx1 = max_curvature * DISC_VERT[DISC_FACE[jj*3+1]*2];
+        const REAL_T vx2 = max_curvature * DISC_VERT[DISC_FACE[jj*3+2]*2];
 
-        REAL_T vy0 = max_curvature * DISC_VERT[DISC_FACE[jj*3]*2 + 1];
-        REAL_T vy1 = max_curvature * DISC_VERT[DISC_FACE[jj*3+1]*2 + 1];
-        REAL_T vy2 = max_curvature * DISC_VERT[DISC_FACE[jj*3+2]*2 + 1];
+        const REAL_T vy0 = max_curvature * DISC_VERT[DISC_FACE[jj*3]*2 + 1];
+        const REAL_T vy1 = max_curvature * DISC_VERT[DISC_FACE[jj*3+1]*2 + 1];
+        const REAL_T vy2 = max_curvature * DISC_VERT[DISC_FACE[jj*3+2]*2 + 1];
 
         k1_probe = vx0 + r1 * (vx1 - vx0) + r2 * (vx2 - vx0);
         k2_probe = vy0 + r1 * (vy1 - vy0) + r2 * (vy2 - vy0);
 
         get_probing_frame_d<IS_INIT>(__frame_sh, st, probing_frame);
 
-        REAL_T this_support = calculate_data_support_d(*__last_val_sh,
-                                                       pos, pmf, dimx, dimy, dimz, dimt,
-                                                       odf_sphere_vertices, 
-                                                       voxel_size,
-                                                       k1_probe, k2_probe,
-                                                       probing_frame,
-                                                       &__tmp);
+        const REAL_T this_support = calculate_data_support_d(*__last_val_sh,
+                                                             pos, pmf, dimx, dimy, dimz, dimt,
+                                                             odf_sphere_vertices, 
+                                                             voxel_size,
+                                                             k1_probe, k2_probe,
+                                                             probing_frame,
+                                                             &__tmp);
 
-        int __msk = __ballot_sync(WMASK, this_support >= NORM_MIN_SUPPORT);
-        if (__msk != 0) {
-            int winning_lane = __ffs(__msk) - 1; // Often 0. occasionally more
 
-            __syncwarp(WMASK);
+        __syncwarp(WMASK);
+        int winning_lane = -1; // -1 indicates nobody won
+        if(PURE_PROBABILISTIC) { // find the first lane with above min support
+            const int __msk = __ballot_sync(WMASK, this_support >= NORM_MIN_SUPPORT);
+            if (__msk != 0) {
+                winning_lane = __ffs(__msk) - 1; // Often 0. occasionally more
+            }
+        } else { // find the best lane with above min support (typically of 32 lanes)
+            REAL_T max_support = this_support;
+
+            #pragma unroll
+            for(int j = BDIM_X/2; j; j /= 2) {
+                const REAL_T other_support = __shfl_xor_sync(WMASK, max_support, j, BDIM_X);
+                max_support = MAX(max_support, other_support);
+            }
+
+            if (max_support >= NORM_MIN_SUPPORT) {
+                const int __msk = __ballot_sync(WMASK, this_support == max_support);
+                winning_lane = __ffs(__msk) - 1;
+            }
+        }
+        if (winning_lane != -1) {
             if (tidx == winning_lane) {
                 if (IS_INIT) {
                     dirs[0] = dir;
                 } else {
                     REAL_T __prop[9];
                     REAL_T __dir[3];
-                    prepare_propagator_d(k1_probe, k2_probe, step_size*STEP_FRAC, __prop);
+                    prepare_propagator_d(k1_probe, k2_probe, step_size/STEP_FRAC, __prop);
                     propogate_frame_d(__prop, probing_frame, __dir);
                     dirs[0] = (REAL3_T) {__dir[0], __dir[1], __dir[2]};
                 }

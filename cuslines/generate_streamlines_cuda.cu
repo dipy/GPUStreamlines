@@ -1616,6 +1616,9 @@ __global__ void genStreamlinesMerge_k(const ModelType model_type,
                                                                                         shDir1 + slid*samplm_nr);
                                 __syncwarp(WMASK);
                                 if (!init_norm_success) { // This is rare
+#if 0
+                                        printf("PTT init seed failed");
+#endif
                                         if (tidx == 0) {
                                                 slineLen[slineOff] = 1;
                                                 currSline[0] = seed;
@@ -2136,7 +2139,6 @@ void write_trk(const char *fname,
         float slineData[1 + 3*(2*MAX_SLINE_LEN)];
 #endif
         for(int i = 0; i < nsline; i++) {
-                printf("len %i\n", slineLen[i]);
                 reinterpret_cast<int *>(slineData)[0] = slineLen[i];
                 for(int j = 0; j < slineLen[i]; j++) {
                         slineData[1+3*j+0] = (float)((sline[i*2*MAX_SLINE_LEN + j].x+0.5)*VOXEL_SIZE[0]);
