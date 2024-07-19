@@ -79,6 +79,7 @@
 
 #define MIN(x,y) (((x)<(y))?(x):(y))
 #define MAX(x,y) (((x)>(y))?(x):(y))
+#define POW2(n) (1 << (n))
 
 #define DIV_UP(a,b) (((a)+((b)-1))/(b))
 

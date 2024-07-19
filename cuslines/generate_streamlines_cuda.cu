@@ -1285,7 +1285,6 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                                                         st,
                                                         dataf,
                                                         max_angle,
-                                                        voxel_size,
                                                         step_size,
                                                         direction,
                                                         dimx, dimy, dimz, dimt,
@@ -1590,7 +1589,6 @@ __global__ void genStreamlinesMerge_k(const ModelType model_type,
                                                                                 &st,
                                                                                 dataf,
                                                                                 max_angle,
-                                                                                MAKE_REAL3(1, 1, 1),
                                                                                 step_size,
                                                                                 MAKE_REAL3(-first_step.x, -first_step.y, -first_step.z),
                                                                                 dimx, dimy, dimz, dimt,
@@ -1607,7 +1605,6 @@ __global__ void genStreamlinesMerge_k(const ModelType model_type,
                                                                                         &st,
                                                                                         dataf,
                                                                                         max_angle,
-                                                                                        MAKE_REAL3(1, 1, 1),
                                                                                         step_size,
                                                                                         MAKE_REAL3(first_step.x, first_step.y, first_step.z),
                                                                                         dimx, dimy, dimz, dimt,
@@ -1642,11 +1639,6 @@ __global__ void genStreamlinesMerge_k(const ModelType model_type,
                                 for (int ii = 0; ii < 9; ii++) {
                                         sh_ptr_to_save[ii + 9*tidy] = -sh_ptr[ii + 9*tidy]; // frame
                                 }
-
-                                sh_ptr += BDIM_Y*9;
-                                sh_ptr_to_save += BDIM_Y*9;
-
-                                sh_ptr_to_save[tidy] = sh_ptr[tidy]; // last val
                         }
                         __syncwarp(WMASK);
                 }
@@ -1702,11 +1694,6 @@ __global__ void genStreamlinesMerge_k(const ModelType model_type,
                                 for (int ii = 0; ii < 9; ii++) {
                                         sh_ptr[ii + 9*tidy] = sh_ptr_saved[ii + 9*tidy]; // frame
                                 }
-
-                                sh_ptr += BDIM_Y*9;
-                                sh_ptr_saved += BDIM_Y*9;
-
-                                sh_ptr[tidy] = sh_ptr_saved[tidy]; // last val
                         }
                         __syncwarp(WMASK);
                 }

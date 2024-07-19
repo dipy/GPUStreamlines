@@ -139,25 +139,22 @@ __device__ void propogate_frame_d(REAL_T* propagator, REAL_T* frame, REAL_T* dir
     for (int ii = 0; ii < 3; ii++) {
         frame[ii] = __tmp[ii];
     }
-
-    norm3_d(direc, 0);
 }
 
 template<typename REAL_T, typename REAL3_T>
 __device__ REAL_T calculate_data_support_d(REAL_T support,
                                            const REAL3_T pos, const REAL_T *__restrict__ pmf,
                                            const int dimx, const int dimy, const int dimz, const int dimt,
+                                           const REAL_T probe_step_size,
                                            const REAL3_T *__restrict__ odf_sphere_vertices,
-                                           const REAL3_T voxel_size,
                                            REAL_T k1, REAL_T k2,
-                                           REAL_T* probing_frame,
-                                           REAL_T* last_val_probe) {
+                                           REAL_T* probing_frame) {
     REAL_T probing_prop[9];
     REAL_T direc[3];
     REAL3_T probing_pos;
     REAL_T fod_amp;
 
-    prepare_propagator_d(k1, k2, PROBE_STEP, probing_prop);
+    prepare_propagator_d(k1, k2, probe_step_size, probing_prop);
     probing_pos.x = pos.x;
     probing_pos.y = pos.y;
     probing_pos.z = pos.z;
@@ -165,9 +162,9 @@ __device__ REAL_T calculate_data_support_d(REAL_T support,
     for (int ii = 0; ii < PROBE_QUALITY; ii++) {
         propogate_frame_d(probing_prop, probing_frame, direc);
 
-        probing_pos.x += direc[0] * voxel_size.x;
-        probing_pos.y += direc[1] * voxel_size.y;
-        probing_pos.z += direc[2] * voxel_size.z;
+        probing_pos.x += direc[0];
+        probing_pos.y += direc[1];
+        probing_pos.z += direc[2];
 
         fod_amp = interp4_d(probing_pos, probing_frame, pmf,
                             dimx, dimy, dimz, dimt,
@@ -176,15 +173,11 @@ __device__ REAL_T calculate_data_support_d(REAL_T support,
             if (ALLOW_WEAK_LINK) {
                 fod_amp = 0;
             } else {
-                *last_val_probe = 0;
                 return 0;    
             }
         }
         support += fod_amp;
     }
-
-    *last_val_probe = fod_amp;
-
     return support;
 }
 
@@ -197,7 +190,6 @@ __device__ int get_direction_ptt_d(
     curandStatePhilox4_32_10_t *st,
     const REAL_T *__restrict__ pmf,
     const REAL_T max_angle,
-    const REAL3_T voxel_size,
     const REAL_T step_size,
     REAL3_T dir,
     const int dimx, const int dimy, const int dimz, const int dimt,
@@ -223,14 +215,15 @@ __device__ int get_direction_ptt_d(
     REAL_T *__face_cdf_sh = reinterpret_cast<REAL_T *>(__sh);
     REAL_T *__vert_pdf_sh = __face_cdf_sh + BDIM_Y*DISC_FACE_CNT; // These first two can be overwritten in other functions
     REAL_T *__frame_sh = __vert_pdf_sh + BDIM_Y*DISC_VERT_CNT; // the rest must persist form call to call
-    REAL_T *__last_val_sh = __frame_sh + BDIM_Y*9;
+    REAL_T *__first_val_sh = __frame_sh + BDIM_Y*9;
 
     __face_cdf_sh += tidy*DISC_FACE_CNT;
     __vert_pdf_sh += tidy*DISC_VERT_CNT; 
     __frame_sh += tidy*9;
-    __last_val_sh += tidy*1;
+    __first_val_sh += tidy*1;
 
     const REAL_T max_curvature = (2 * SIN(max_angle / 2)) / step_size; // bigger numbers means wiggle more
+    const REAL_T probe_step_size = ((step_size / 2) / (PROBE_QUALITY - 1));
 
     REAL_T __tmp;
 
@@ -239,10 +232,12 @@ __device__ int get_direction_ptt_d(
             __frame_sh[0] = dir.x;
             __frame_sh[1] = dir.y;
             __frame_sh[2] = dir.z;
-            *__last_val_sh = interp4_d(pos, __frame_sh, pmf,
-                                       dimx, dimy, dimz, dimt,
-                                       odf_sphere_vertices);
         }
+    }
+    if (tidx==0) {
+        *__first_val_sh = interp4_d(pos, __frame_sh, pmf,
+                                    dimx, dimy, dimz, dimt,
+                                    odf_sphere_vertices);
     }
     __syncwarp(WMASK);
 
@@ -258,13 +253,13 @@ __device__ int get_direction_ptt_d(
 
             get_probing_frame_d<IS_INIT>(__frame_sh, st, probing_frame);
 
-            REAL_T this_support = calculate_data_support_d(*__last_val_sh,
-                                                           pos, pmf, dimx, dimy, dimz, dimt,
-                                                           odf_sphere_vertices, 
-                                                           voxel_size,
-                                                           k1_probe, k2_probe,
-                                                           probing_frame,
-                                                           &__tmp);
+            const REAL_T this_support = calculate_data_support_d(
+                *__first_val_sh,
+                pos, pmf, dimx, dimy, dimz, dimt,
+                probe_step_size,
+                odf_sphere_vertices,
+                k1_probe, k2_probe,
+                probing_frame);
 
 #if 0
             if (threadIdx.y == 1 && ii == 0) { 
@@ -283,7 +278,7 @@ __device__ int get_direction_ptt_d(
             const int __msk = __ballot_sync(WMASK, support_found);
             support_found = (__msk != 0);
         }
-    } while (IS_INIT && (!support_found) && (jj++ < TRIES_PER_REJECTION_SAMPLING));
+    } while (IS_INIT && (!support_found) && (jj++ < INIT_FRAME_TRIES));
 
 #if 0
     __syncwarp(WMASK);
@@ -305,7 +300,7 @@ __device__ int get_direction_ptt_d(
         for (int jj = 0; jj < 3; jj++) {
             REAL_T vert_val = __vert_pdf_sh[DISC_FACE[ii*3 + jj]];
             if (vert_val == 0) {
-                all_verts_valid = IS_INIT;
+                all_verts_valid = IS_INIT; // On init, even go with faces that are not fully supported
             }
             __face_cdf_sh[ii] += vert_val;
         }
@@ -355,7 +350,7 @@ __device__ int get_direction_ptt_d(
 			if (__face_cdf_sh[jj] >= __tmp)
 				break;
 		}
- 
+
         const REAL_T vx0 = max_curvature * DISC_VERT[DISC_FACE[jj*3]*2];
         const REAL_T vx1 = max_curvature * DISC_VERT[DISC_FACE[jj*3+1]*2];
         const REAL_T vx2 = max_curvature * DISC_VERT[DISC_FACE[jj*3+2]*2];
@@ -369,38 +364,35 @@ __device__ int get_direction_ptt_d(
 
         get_probing_frame_d<IS_INIT>(__frame_sh, st, probing_frame);
 
-        const REAL_T this_support = calculate_data_support_d(*__last_val_sh,
+        const REAL_T this_support = calculate_data_support_d(*__first_val_sh,
                                                              pos, pmf, dimx, dimy, dimz, dimt,
-                                                             odf_sphere_vertices, 
-                                                             voxel_size,
+                                                             probe_step_size,
+                                                             odf_sphere_vertices,
                                                              k1_probe, k2_probe,
-                                                             probing_frame,
-                                                             &__tmp);
+                                                             probing_frame);
 
 
         __syncwarp(WMASK);
         int winning_lane = -1; // -1 indicates nobody won
-        if(PURE_PROBABILISTIC) { // find the first lane with above min support
-            const int __msk = __ballot_sync(WMASK, this_support >= NORM_MIN_SUPPORT);
-            if (__msk != 0) {
-                winning_lane = __ffs(__msk) - 1; // Often 0. occasionally more
-            }
-        } else { // find the best lane with above min support (typically of 32 lanes)
-            REAL_T max_support = this_support;
-
+        int __msk = __ballot_sync(WMASK, this_support >= NORM_MIN_SUPPORT);
+        if (__msk != 0) {
+            REAL_T group_max_support = this_support;
             #pragma unroll
-            for(int j = BDIM_X/2; j; j /= 2) {
-                const REAL_T other_support = __shfl_xor_sync(WMASK, max_support, j, BDIM_X);
-                max_support = MAX(max_support, other_support);
+            for(int j = 1; j < PROBABILISTIC_GROUP_SZ; j *= 2) {
+                __tmp = __shfl_xor_sync(WMASK, group_max_support, j, BDIM_X);
+                group_max_support = MAX(group_max_support, __tmp);
             }
 
-            if (max_support >= NORM_MIN_SUPPORT) {
-                const int __msk = __ballot_sync(WMASK, this_support == max_support);
-                winning_lane = __ffs(__msk) - 1;
-            }
+            __msk &= __ballot_sync(WMASK, this_support == group_max_support);
+            winning_lane = __ffs(__msk) - 1;
         }
         if (winning_lane != -1) {
             if (tidx == winning_lane) {
+#if 0
+                if (threadIdx.y == 1) {
+                    printf("winning k1 %f, k2 %f, cdf %f, cdf_idx %i", k1_probe, k2_probe, __tmp, jj);
+                }
+#endif
                 if (IS_INIT) {
                     dirs[0] = dir;
                 } else {
@@ -408,13 +400,13 @@ __device__ int get_direction_ptt_d(
                     REAL_T __dir[3];
                     prepare_propagator_d(k1_probe, k2_probe, step_size/STEP_FRAC, __prop);
                     propogate_frame_d(__prop, probing_frame, __dir);
+                    norm3_d(__dir, 0); // this will be scaled by the generic stepping code
                     dirs[0] = (REAL3_T) {__dir[0], __dir[1], __dir[2]};
                 }
 
                 for (int jj = 0; jj < 9; jj++) {
                     __frame_sh[jj] = probing_frame[jj];
                 }
-                *__last_val_sh = __tmp;
             }
             __syncwarp(WMASK);
             return 1;
