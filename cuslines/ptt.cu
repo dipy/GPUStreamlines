@@ -230,7 +230,7 @@ __device__ int get_direction_ptt_d(
     __frame_sh += tidy*9;
     __last_val_sh += tidy*1;
 
-    const REAL_T max_curvature = SIN(max_angle / 2) / (step_size * 2); // bigger numbers means wiggle more
+    const REAL_T max_curvature = (2 * SIN(max_angle / 2)) / step_size; // bigger numbers means wiggle more
 
     REAL_T __tmp;
 
