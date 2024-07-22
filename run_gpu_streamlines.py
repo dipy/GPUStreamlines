@@ -32,6 +32,7 @@ import random
 import time
 
 import numpy as np
+import numpy.linalg as npl
 
 import dipy.reconst.dti as dti
 from dipy.io import read_bvals_bvecs
@@ -40,10 +41,11 @@ from dipy.io.streamline import save_tractogram
 from dipy.tracking import utils
 from dipy.core.gradients import gradient_table, unique_bvals_magnitude
 from dipy.data import small_sphere
-#from dipy.direction import BootDirectionGetter
+from dipy.direction import (BootDirectionGetter, ProbabilisticDirectionGetter, PTTDirectionGetter)
 from dipy.reconst.shm import OpdtModel, CsaOdfModel
 from dipy.reconst.csdeconv import ConstrainedSphericalDeconvModel, auto_response_ssst
-#from dipy.tracking.local import LocalTracking, ThresholdTissueClassifier
+from dipy.tracking.local_tracking import LocalTracking
+from dipy.tracking.stopping_criterion import ThresholdStoppingCriterion
 from dipy.reconst import shm
 from dipy.data import get_fnames
 from dipy.data import read_stanford_pve_maps
@@ -72,11 +74,17 @@ def get_img(ep2_seq):
 
 print("parsing arguments")
 parser = argparse.ArgumentParser()
+parser.add_argument("nifti_file", nargs='?', default='hardi', help="path to the DWI nifti file")
+parser.add_argument("bvals", nargs='?', default='hardi', help="path to the bvals")
+parser.add_argument("bvecs", nargs='?', default='hardi', help="path to the bvecs")
+parser.add_argument("mask_nifti", nargs='?', default='hardi', help="path to the mask file")
+parser.add_argument("roi_nifti", nargs='?', default='hardi', help="path to the ROI file")
+parser.add_argument("--device", type=str, default ='gpu', choices=['cpu', 'gpu'], help="Whether to use cpu or gpu")
 parser.add_argument("--output-prefix", type=str, default ='', help="path to the output file")
-parser.add_argument("--chunk-size", type=int, default=100000, help="how many seeds to process per sweep, per GPU.")
-parser.add_argument("--nseeds", type=int, default=None, help="how many seeds to process in total")
-parser.add_argument("--ngpus", type=int, required=True, help="number of GPUs to use")
-parser.add_argument("--use-fast-write", action='store_true', help="use fast file write")
+parser.add_argument("--chunk-size", type=int, default=100000, help="how many seeds to process per sweep, per GPU")
+parser.add_argument("--nseeds", type=int, default=100000, help="how many seeds to process in total")
+parser.add_argument("--ngpus", type=int, default=1, help="number of GPUs to use if using gpu")
+parser.add_argument("--use-fast-write", action='store_true', help="use fast file write (only if using gpu)")
 parser.add_argument("--max-angle", type=float, default=60, help="max angle (in degrees)")
 parser.add_argument("--min-signal", type=float, default=1.0, help="default: 1.0")
 parser.add_argument("--step-size", type=float, default=0.5, help="default: 0.5")
@@ -85,28 +93,37 @@ parser.add_argument("--fa-threshold",type=float,default=0.1,help="FA threshold")
 parser.add_argument("--relative-peak-threshold",type=float,default=0.25,help="relative peak threshold")
 parser.add_argument("--min-separation-angle",type=float,default=45,help="min separation angle (in degrees)")
 parser.add_argument("--sm-lambda",type=float,default=0.006,help="smoothing lambda")
-parser.add_argument("--sampling-density", type=int, default=3, help="sampling density for seed generation")
 parser.add_argument("--model", type=str, default="opdt", choices=['opdt', 'csa', 'csd'], help="model to use")
-parser.add_argument("--dg", type=str, default="boot", choices=['boot', 'prob'], help="direction getting scheme to use")
+parser.add_argument("--dg", type=str, default="boot", choices=['boot', 'prob', 'ptt'], help="direction getting scheme to use")
+
 args = parser.parse_args()
 
-# Get Stanford HARDI data
-hardi_nifti_fname, hardi_bval_fname, hardi_bvec_fname = get_fnames('stanford_hardi')
+if 'hardi' in [args.nifti_file, args.bvals, args.bvecs, args.mask_nifti, args.roi_nifti]:
+  if not all(arg == 'hardi' for arg in [args.nifti_file, args.bvals, args.bvecs, args.mask_nifti, args.roi_nifti]):
+    raise ValueError("If any of the arguments is 'hardi', all must be 'hardi'")
+  # Get Stanford HARDI data
+  hardi_nifti_fname, hardi_bval_fname, hardi_bvec_fname = get_fnames('stanford_hardi')
+  csf, gm, wm = read_stanford_pve_maps()
+  wm_data = wm.get_fdata()
 
-print(hardi_nifti_fname, hardi_bval_fname, hardi_bvec_fname)
+  img = get_img(hardi_nifti_fname)
+  voxel_order = "".join(aff2axcodes(img.affine))
+  img_affine = img.affine
 
-csf, gm, wm = read_stanford_pve_maps()
-wm_data = wm.get_fdata()
+  gtab = get_gtab(hardi_bval_fname, hardi_bvec_fname)
 
-img = get_img(hardi_nifti_fname)
-voxel_order = "".join(aff2axcodes(img.affine))
-
-gtab = get_gtab(hardi_bval_fname, hardi_bvec_fname)
-#roi = get_img(hardi_nifti_fname)
-
-data = img.get_fdata()
-roi_data = (wm_data > 0.5)
-mask = roi_data
+  data = img.get_fdata()
+  roi_data = (wm_data > 0.5)
+  mask = roi_data
+else:
+  img = get_img(args.nifti_file)
+  voxel_order = "".join(aff2axcodes(img.affine))
+  gtab = get_gtab(args.bvals, args.bvecs)
+  roi = get_img(args.roi_nifti)
+  mask = get_img(args.mask_nifti)
+  data = img.get_data()
+  roi_data = roi.get_data()
+  mask = mask.get_data()
 
 tenmodel = dti.TensorModel(gtab, fit_method='WLS')
 print('Fitting Tensor')
@@ -116,11 +133,10 @@ FA = tenfit.fa
 FA[np.isnan(FA)] = 0
 
 # Setup tissue_classifier args
-#tissue_classifier = ThresholdTissueClassifier(FA, args.fa_threshold)
+tissue_classifier = ThresholdStoppingCriterion(FA, args.fa_threshold)
 metric_map = np.asarray(FA, 'float64')
 
 # Create seeds for ROI
-#seed_mask = utils.seeds_from_mask(roi_data, density=sampling_density, affine=img_affine)
 # seed_mask = utils.seeds_from_mask(roi_data, density=args.sampling_density, affine=np.eye(4))
 # seed_mask = seed_mask[0:args.nseeds]
 seed_mask = np.asarray(utils.random_seeds_from_mask(
@@ -145,7 +161,6 @@ elif args.model == "csa":
   delta_b = fit_matrix
   delta_q = fit_matrix
 else:
-  model_type = cuslines.ModelType.CSD
   print("Running CSD model...")
   unique_bvals = unique_bvals_magnitude(gtab.bvals)
   if len(unique_bvals[unique_bvals > 0]) > 1:
@@ -167,59 +182,75 @@ else:
   delta_b = model._X
   delta_q = model.B_reg
 
-if args.dg == "prob":
-  model_type = cuslines.ModelType.PROB
+if args.dg != "boot":
+  if args.dg == "prob":
+    model_type = cuslines.ModelType.PROB
+    dg = ProbabilisticDirectionGetter
+  else:
+    model_type = cuslines.ModelType.PTT
+    dg = PTTDirectionGetter
   fit = model.fit(data, mask=(metric_map >= args.fa_threshold))
   data = fit.odf(small_sphere).clip(min=0)
-  print(data.shape)
+else:
+  dg = BootDirectionGetter
+
+global_chunk_size = args.chunk_size
 
 # Setup direction getter args
-b0s_mask = gtab.b0s_mask
-dwi_mask = ~b0s_mask
+if args.device == "cpu":
+  if args.dg != "boot":
+    dg = dg.from_pmf(data, max_angle=args.max_angle, sphere=small_sphere, relative_peak_threshold=args.relative_peak_threshold, min_separation_angle=args.min_separation_angle)
+  else:
+    dg = BootDirectionGetter.from_data(data, model, max_angle=args.max_angle, sphere=small_sphere, sh_order=args.sh_order, relative_peak_threshold=args.relative_peak_threshold, min_separation_angle=args.min_separation_angle)
+else:
+  # Setup direction getter args
+  b0s_mask = gtab.b0s_mask
+  dwi_mask = ~b0s_mask
 
+  # setup sampling matrix
+  sphere = small_sphere
+  theta = sphere.theta
+  phi = sphere.phi
+  sampling_matrix, _, _ = shm.real_sym_sh_basis(args.sh_order, theta, phi)
 
-# setup sampling matrix
-sphere = small_sphere
-theta = sphere.theta
-phi = sphere.phi
-sampling_matrix, _, _ = shm.real_sym_sh_basis(args.sh_order, theta, phi)
+  ## from BootPmfGen __init__
+  # setup H and R matrices
+  # TODO: figure out how to get H, R matrices from direction getter object
+  x, y, z = model.gtab.gradients[dwi_mask].T
+  r, theta, phi = shm.cart2sphere(x, y, z)
+  B, _, _ = shm.real_sym_sh_basis(args.sh_order, theta, phi)
+  H = shm.hat(B)
+  R = shm.lcr_matrix(H)
 
-## from BootPmfGen __init__
-# setup H and R matrices
-# TODO: figure out how to get H, R matrices from direction getter object
-x, y, z = model.gtab.gradients[dwi_mask].T
-r, theta, phi = shm.cart2sphere(x, y, z)
-B, _, _ = shm.real_sym_sh_basis(args.sh_order, theta, phi)
-H = shm.hat(B)
-R = shm.lcr_matrix(H)
+  # create floating point copy of data
+  dataf = np.asarray(data, dtype=np.float64)
 
-# create floating point copy of data
-dataf = np.asarray(data, dtype=float)
+  gpu_tracker = cuslines.GPUTracker(model_type,
+                                    args.max_angle * np.pi/180,
+                                    args.min_signal,
+                                    args.fa_threshold,
+                                    args.step_size,
+                                    args.relative_peak_threshold,
+                                    args.min_separation_angle * np.pi/180,
+                                    dataf.astype(np.float64), H.astype(np.float64), R.astype(np.float64), delta_b.astype(np.float64), delta_q.astype(np.float64),
+                                    b0s_mask.astype(np.int32), metric_map.astype(np.float64), sampling_matrix.astype(np.float64),
+                                    sphere.vertices.astype(np.float64), sphere.edges.astype(np.int32),
+                                    ngpus=args.ngpus, rng_seed=0)
 
 print('streamline gen')
-global_chunk_size = args.chunk_size * args.ngpus
 nchunks = (seed_mask.shape[0] + global_chunk_size - 1) // global_chunk_size
 
-#streamline_generator = LocalTracking(boot_dg, tissue_classifier, seed_mask, affine=np.eye(4), step_size=args.step_size)
-
-gpu_tracker = cuslines.GPUTracker(model_type,
-                                  args.max_angle * np.pi/180,
-                                  args.min_signal,
-                                  args.fa_threshold,
-                                  args.step_size,
-                                  args.relative_peak_threshold,
-                                  args.min_separation_angle * np.pi/180,
-                                  dataf, H, R, delta_b, delta_q,
-                                  b0s_mask.astype(np.int32), metric_map, sampling_matrix,
-                                  sphere.vertices, sphere.edges.astype(np.int32),
-                                  ngpus=args.ngpus, rng_seed=0)
 t1 = time.time()
 streamline_time = 0
 io_time = 0
 for idx in range(int(nchunks)):
   # Main streamline computation
   ts = time.time()
-  streamlines = gpu_tracker.generate_streamlines(seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size])
+  if args.device == "cpu":
+    streamline_generator = LocalTracking(dg, tissue_classifier, seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size], affine=np.eye(4), step_size=args.step_size)
+    streamlines = [s for s in streamline_generator]
+  else:
+    streamlines = gpu_tracker.generate_streamlines(seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size])
   te = time.time()
   streamline_time += (te-ts)
   print("Generated {} streamlines from {} seeds, time: {} s".format(len(streamlines),
@@ -228,24 +259,16 @@ for idx in range(int(nchunks)):
 
   # Save tracklines file
   if args.output_prefix:
-    #print(seed_mask)
-    #print(streamlines)
-    if args.use_fast_write:
-      prefix = "{}.{}_{}".format(args.output_prefix, idx+1, nchunks)
-      ts = time.time()
-      #gpu_tracker.dump_streamlines(prefix, voxel_order, roi.shape, roi.header.get_zooms(), img.affine)
-      gpu_tracker.dump_streamlines(prefix, voxel_order, wm.shape, wm.header.get_zooms(), img.affine)
-      te = time.time()
-      print("Saved streamlines to {}_*.trk, time {} s".format(prefix, te-ts))
+    ts = time.time()
+    if (args.device == "gpu") and args.use_fast_write:
+      fname = "{}.{}_{}".format(args.output_prefix, idx+1, nchunks)
+      gpu_tracker.dump_streamlines(fname, voxel_order, wm.shape, wm.header.get_zooms(), img.affine)
     else:
       fname = "{}.{}_{}.trk".format(args.output_prefix, idx+1, nchunks)
-      ts = time.time()
-      #save_tractogram(fname, streamlines, img.affine, vox_size=roi.header.get_zooms(), shape=roi_data.shape)
-      #save_tractogram(fname, streamlines)
-      sft = StatefulTractogram(streamlines, hardi_nifti_fname, Space.VOX)
+      sft = StatefulTractogram(streamlines, args.nifti_file, Space.VOX)
       save_tractogram(sft, fname)
-      te = time.time()
-      print("Saved streamlines to {}, time {} s".format(fname, te-ts))
+    te = time.time()
+    print("Saved streamlines to {}, time {} s".format(fname, te-ts))
     io_time += (te-ts)
 
 t2 = time.time()
