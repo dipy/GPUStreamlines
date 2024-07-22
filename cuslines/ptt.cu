@@ -24,32 +24,30 @@ template<typename REAL_T, typename REAL3_T>
 __device__ REAL_T interp4_d(const REAL3_T pos, const REAL_T* frame, const REAL_T *__restrict__ pmf,
                             const int dimx, const int dimy, const int dimz, const int dimt,
                             const REAL3_T *__restrict__ odf_sphere_vertices) {
-    const REAL_T HALF = static_cast<REAL_T>(0.5);
-
     int closest_odf_idx = 0;
-    REAL_T __tmp = 0;
+    REAL_T __max_cos = 0;
     for (int ii = 0; ii < dimt; ii++) {
         REAL_T cos_sim = FABS(
             odf_sphere_vertices[ii].x * frame[0] \
             + odf_sphere_vertices[ii].y * frame[1] \
             + odf_sphere_vertices[ii].z * frame[2]);
-        if (cos_sim > __tmp) {
-            __tmp = cos_sim;
+        if (cos_sim > __max_cos) {
+            __max_cos = cos_sim;
             closest_odf_idx = ii;
         }
     }
 
     const int rv = trilinear_interp_d<1>(dimx, dimy, dimz, dimt, closest_odf_idx,
-                                         pmf, pos, &__tmp);
+                                         pmf, pos, &__max_cos);
 
 #if 0
-    printf("inerpolated %f at %f, %f, %f, %i\n", __tmp, pos.x, pos.y, pos.z, closest_odf_idx);
+    printf("inerpolated %f at %f, %f, %f, %i\n", __max_cos, pos.x, pos.y, pos.z, closest_odf_idx);
 #endif
 
     if (rv != 0) {
         return -1;
     } else {
-        return __tmp;
+        return __max_cos;
     }
 }
 
@@ -159,7 +157,7 @@ __device__ REAL_T calculate_data_support_d(REAL_T support,
     probing_pos.y = pos.y;
     probing_pos.z = pos.z;
 
-    for (int ii = 0; ii < PROBE_QUALITY; ii++) {
+    for (int ii = 0; ii < PROBE_QUALITY; ii++) { // we spend about 2/3 of our time in this loop when doing PTT
         propogate_frame_d(probing_prop, probing_frame, direc);
 
         probing_pos.x += direc[0];
