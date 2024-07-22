@@ -169,12 +169,8 @@ __device__ REAL_T calculate_data_support_d(REAL_T support,
         fod_amp = interp4_d(probing_pos, probing_frame, pmf,
                             dimx, dimy, dimz, dimt,
                             odf_sphere_vertices);
-        if (fod_amp < PMF_THRESHOLD_P) {
-            if (ALLOW_WEAK_LINK) {
-                fod_amp = 0;
-            } else {
-                return 0;    
-            }
+        if (!ALLOW_WEAK_LINK && (fod_amp < PMF_THRESHOLD_P)) {
+            return 0;
         }
         support += fod_amp;
     }
@@ -222,7 +218,7 @@ __device__ int get_direction_ptt_d(
     __frame_sh += tidy*9;
     __first_val_sh += tidy*1;
 
-    const REAL_T max_curvature = (2 * SIN(max_angle / 2)) / step_size; // bigger numbers means wiggle more
+    const REAL_T max_curvature = SIN(max_angle / 2) / step_size; // bigger numbers means wiggle more
     const REAL_T probe_step_size = ((step_size / 2) / (PROBE_QUALITY - 1));
 
     REAL_T __tmp;
