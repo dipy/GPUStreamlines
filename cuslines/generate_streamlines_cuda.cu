@@ -254,16 +254,15 @@ __device__ void fit_csa(const int delta_nr,
         __syncwarp(WMASK);
 }
 
-template<int BDIM_X, typename REAL_T>
-__device__ void fit_model_coef(const ModelType model_type,
-                               const int delta_nr, // delta_nr is number of ODF directions
+template<int BDIM_X, ModelType MODEL_T, typename REAL_T>
+__device__ void fit_model_coef(const int delta_nr, // delta_nr is number of ODF directions
                                const int hr_side, // hr_side is number of data directions
                                const REAL_T *__restrict__ delta_q,
                                const REAL_T *__restrict__ delta_b, // these are fit matrices the model can use, different for each model
                                const REAL_T *__restrict__ __msk_data_sh, // __msk_data_sh is the part of the data currently being operated on by this block
                                REAL_T *__restrict__ __h_sh, // these last two are modifications to the coefficients that will be returned
                                REAL_T *__restrict__ __r_sh) {
-        switch(model_type) {
+        switch(MODEL_T) {
                 case OPDT:
                         fit_opdt<BDIM_X>(delta_nr, hr_side, delta_q, delta_b, __msk_data_sh, __h_sh, __r_sh);
                         break;
@@ -918,11 +917,11 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
 template<int BDIM_X,
          int BDIM_Y,
          int NATTEMPTS,
+         ModelType MODEL_T,
          typename REAL_T,
          typename REAL3_T>
 __device__ int get_direction_boot_d(
                                 curandStatePhilox4_32_10_t *st,
-                                const ModelType model_type,
                                 const REAL_T max_angle,
                                 const REAL_T min_signal,
                                 const REAL_T relative_peak_thres,
@@ -1069,7 +1068,7 @@ __device__ int get_direction_boot_d(
 			maskGet<BDIM_X>(dimt, b0s_mask, __vox_data_sh, __msk_data_sh);
 			__syncwarp(WMASK);
 
-                        fit_model_coef<BDIM_X>(model_type, delta_nr, hr_side, delta_q, delta_b, __msk_data_sh, __h_sh, __r_sh);
+                        fit_model_coef<BDIM_X, MODEL_T>(delta_nr, hr_side, delta_q, delta_b, __msk_data_sh, __h_sh, __r_sh);
 
                         // __r_sh[tidy] <- python 'coef'
 
@@ -1190,10 +1189,10 @@ __device__ int check_point_d(const REAL_T tc_threshold,
 
 template<int BDIM_X,
          int BDIM_Y,
+         ModelType MODEL_T,
          typename REAL_T,
          typename REAL3_T>
 __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
-			 const ModelType model_type,
 			 const REAL_T max_angle,
 			 const REAL_T min_signal,
 			 const REAL_T tc_threshold,
@@ -1253,7 +1252,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
         __syncwarp(WMASK);
 
         int step_frac;
-        if (model_type == PTT) {
+        if (MODEL_T == PTT) {
                 step_frac = STEP_FRAC; 
         } else {
                 step_frac = 1; // STEP_FRAC could be useful in other models
@@ -1262,7 +1261,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
         int i;
         for(i = 1; i < MAX_SLINE_LEN*step_frac; i++) {
                 int ndir;
-                if (model_type == PROB) {
+                if (MODEL_T == PROB) {
                         ndir = get_direction_prob_d<BDIM_X,
                                                     BDIM_Y,
                                                     0>(
@@ -1278,7 +1277,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                                                         sphere_edges,
                                                         num_edges,
                                                         __shDir);
-                } else if (model_type == PTT) {
+                } else if (MODEL_T == PTT) {
                         ndir = get_direction_ptt_d<BDIM_X,
                                                    BDIM_Y,
                                                    0>(
@@ -1295,9 +1294,9 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                         // call get_direction_boot_d() with NATTEMPTS=5
                         ndir = get_direction_boot_d<BDIM_X,
                                                     BDIM_Y,
-                                                    5>(
+                                                    5,
+                                                    MODEL_T>(
                                                         st,
-                                                        model_type,
                                                         max_angle,
                                                         min_signal,
                                                         relative_peak_thres,
@@ -1373,13 +1372,13 @@ template<int BDIM_X,
          int BDIM_Y,
          typename REAL_T,
          typename REAL3_T>
-__global__ void getNumStreamlines_k(const ModelType model_type,
+__global__ void getNumStreamlinesBoot_k(
+                                    const ModelType model_type,
                                     const REAL_T max_angle,
-				    const REAL_T min_signal,
-				    const REAL_T relative_peak_thres,
-				    const REAL_T min_separation_angle,
-				    const long long rndSeed,
-                                    const int rndOffset,
+				                    const REAL_T min_signal,
+				                    const REAL_T relative_peak_thres,
+				                    const REAL_T min_separation_angle,
+				                    const long long rndSeed,
                                     const int nseed,
                                     const REAL3_T *__restrict__ seeds,
                                     const int dimx,
@@ -1389,17 +1388,17 @@ __global__ void getNumStreamlines_k(const ModelType model_type,
                                     const REAL_T *__restrict__ dataf,
                                     const REAL_T *__restrict__ H,
                                     const REAL_T *__restrict__ R,
-				    const int delta_nr,
+				                    const int delta_nr,
                                     const REAL_T *__restrict__ delta_b,
                                     const REAL_T *__restrict__ delta_q,
                                     const int  *__restrict__ b0s_mask, // change to int
-				    const int samplm_nr,
+				                    const int samplm_nr,
                                     const REAL_T *__restrict__ sampling_matrix,
                                     const REAL3_T *__restrict__ sphere_vertices,
                                     const int2 *__restrict__ sphere_edges,
                                     const int num_edges,
-                                          REAL3_T *__restrict__ shDir0,
-                                          int *slineOutOff) {
+                                    REAL3_T *__restrict__ shDir0,
+                                    int *slineOutOff) {
 
         const int tidx = threadIdx.x;
         const int slid = blockIdx.x*blockDim.y + threadIdx.y;
@@ -1430,28 +1429,13 @@ __global__ void getNumStreamlines_k(const ModelType model_type,
 	//}
 
         int ndir;
-        if ((model_type == PROB) || (model_type == PTT)) {
-                ndir = get_direction_prob_d<BDIM_X,
-                                            BDIM_Y,
-                                            1>(
-                                                &st,
-                                                dataf,
-                                                max_angle,
-                                                relative_peak_thres,
-                                                min_separation_angle,
-                                                MAKE_REAL3(0,0,0),
-                                                dimx, dimy, dimz, dimt,
-                                                seed,
-                                                sphere_vertices,
-                                                sphere_edges,
-                                                num_edges,
-                                                __shDir);
-        } else {
+        switch(model_type) {
+            case OPDT:
                 ndir = get_direction_boot_d<BDIM_X,
                                             BDIM_Y,
-                                            1>(
+                                            1,
+                                            OPDT>(
                                                 &st,
-                                                model_type,
                                                 max_angle,
                                                 min_signal,
                                                 relative_peak_thres,
@@ -1473,17 +1457,42 @@ __global__ void getNumStreamlines_k(const ModelType model_type,
                                                 sphere_edges,
                                                 num_edges,
                                                 __shDir);
+                break;
+            case CSA:
+                ndir = get_direction_boot_d<BDIM_X,
+                                            BDIM_Y,
+                                            1,
+                                            CSA>(
+                                                &st,
+                                                max_angle,
+                                                min_signal,
+                                                relative_peak_thres,
+                                                min_separation_angle,
+                                                MAKE_REAL3(0,0,0),
+                                                dimx, dimy, dimz, dimt, dataf,
+                                                b0s_mask /* !dwi_mask */,
+                                                seed,
+                                                H, R,
+                                                // model unused
+                                                // max_angle, pmf_threshold from global defines
+                                                // b0s_mask already passed
+                                                // min_signal from global defines
+                                                delta_nr,
+                                                delta_b, delta_q, // fit_matrix
+                                                samplm_nr,
+                                                sampling_matrix,
+                                                sphere_vertices,
+                                                sphere_edges,
+                                                num_edges,
+                                                __shDir);
+                break;
+            default:
+                printf("FATAL: Invalid Model Type.\n");
+                break;
         }
+
         if (tidx == 0) {
                 slineOutOff[slid] = ndir;
-
-		//if (!tidx && !threadIdx.y && !blockIdx.x) {
-		//	printf("ndir: %d\n", ndir);
-		//	for(int i = 0; i < ndir; i++) {
-		//		printf("%f %f %f\n", __shDir[i].x, __shDir[i].y, __shDir[i].z);	
-		//	}
-		//}
-
         }
 
         return;
@@ -1493,7 +1502,63 @@ template<int BDIM_X,
          int BDIM_Y,
          typename REAL_T,
          typename REAL3_T>
-__global__ void genStreamlinesMerge_k(const ModelType model_type,
+__global__ void getNumStreamlinesProb_k(const REAL_T max_angle,
+				                        const REAL_T relative_peak_thres,
+				                        const REAL_T min_separation_angle,
+				                        const long long rndSeed,
+                                        const int nseed,
+                                        const REAL3_T *__restrict__ seeds,
+                                        const int dimx,
+                                        const int dimy,
+                                        const int dimz,
+                                        const int dimt,
+                                        const REAL_T *__restrict__ dataf,
+                                        const REAL3_T *__restrict__ sphere_vertices,
+                                        const int2 *__restrict__ sphere_edges,
+                                        const int num_edges,
+                                        REAL3_T *__restrict__ shDir0,
+                                        int *slineOutOff) {
+
+        const int tidx = threadIdx.x;
+        const int slid = blockIdx.x*blockDim.y + threadIdx.y;
+        const size_t gid = blockIdx.x * blockDim.y * blockDim.x + blockDim.x * threadIdx.y + threadIdx.x;
+
+        if (slid >= nseed) {
+                return;
+        }
+
+        REAL3_T *__restrict__ __shDir = shDir0+slid*dimt;
+        curandStatePhilox4_32_10_t st;
+        curand_init(rndSeed, gid, 0, &st);
+
+        int ndir = get_direction_prob_d<BDIM_X,
+                                        BDIM_Y,
+                                        1>(
+                                                &st,
+                                                dataf,
+                                                max_angle,
+                                                relative_peak_thres,
+                                                min_separation_angle,
+                                                MAKE_REAL3(0,0,0),
+                                                dimx, dimy, dimz, dimt,
+                                                seeds[slid],
+                                                sphere_vertices,
+                                                sphere_edges,
+                                                num_edges,
+                                                __shDir);
+        if (tidx == 0) {
+                slineOutOff[slid] = ndir;
+        }
+
+        return;
+}
+
+template<int BDIM_X,
+         int BDIM_Y,
+         ModelType MODEL_T,
+         typename REAL_T,
+         typename REAL3_T>
+__global__ void genStreamlinesMerge_k(
 				      const REAL_T max_angle,
 				      const REAL_T min_signal,
 				      const REAL_T tc_threshold,
@@ -1580,7 +1645,7 @@ __global__ void genStreamlinesMerge_k(const ModelType model_type,
                 }
 #endif
 
-                if (model_type == PTT) {
+                if (MODEL_T == PTT) {
                         bool init_norm_success;
                         // Here we probabilistic find a good intial normal for this initial direction 
                         init_norm_success = (bool) get_direction_ptt_d<BDIM_X,
@@ -1646,31 +1711,31 @@ __global__ void genStreamlinesMerge_k(const ModelType model_type,
 
                 int stepsB;
                 const int tissue_classB = tracker_d<BDIM_X,
-                                                    BDIM_Y>(&st,
-							    model_type,
-						            max_angle,
-						            min_signal,
-							    tc_threshold,
-							    step_size,
-							    relative_peak_thres,
-							    min_separation_angle,
-                                                            seed,
-                                                            MAKE_REAL3(-first_step.x, -first_step.y, -first_step.z),
-                                                            MAKE_REAL3(1, 1, 1),
-                                                            dimx, dimy, dimz, dimt, dataf,
-                                                            b0s_mask,
-                                                            H, R,
-                                                            metric_map,
-							    delta_nr,
-                                                            delta_b, delta_q, //fit_matrix
-							    samplm_nr,
-                                                            sampling_matrix,
-                                                            sphere_vertices,
-                                                            sphere_edges,
-                                                            num_edges,
-                                                            shDir1 + slid*samplm_nr,
-                                                            &stepsB,
-                                                            currSline);
+                                                    BDIM_Y,
+                                                    MODEL_T>(&st,
+		                        				             max_angle,
+			                        			             min_signal,
+			                            				     tc_threshold,
+	                            						     step_size,
+	                            						     relative_peak_thres,
+	                            						     min_separation_angle,
+                                                             seed,
+                                                             MAKE_REAL3(-first_step.x, -first_step.y, -first_step.z),
+                                                             MAKE_REAL3(1, 1, 1),
+                                                             dimx, dimy, dimz, dimt, dataf,
+                                                             b0s_mask,
+                                                             H, R,
+                                                             metric_map,
+							                                 delta_nr,
+                                                             delta_b, delta_q, //fit_matrix
+		                            					     samplm_nr,
+                                                             sampling_matrix,
+                                                             sphere_vertices,
+                                                             sphere_edges,
+                                                             num_edges,
+                                                             shDir1 + slid*samplm_nr,
+                                                             &stepsB,
+                                                             currSline);
                 //if (tidx == 0) {
                 //        slineLenB[slineOff] = stepsB;
                 //}
@@ -1684,7 +1749,7 @@ __global__ void genStreamlinesMerge_k(const ModelType model_type,
                         }
                 }
 
-                if (model_type == PTT) {
+                if (MODEL_T == PTT) {
                         __syncwarp(WMASK);
                         if (tidx == 0) {
                                 // Setup the forwards step using parameters saved from backwards step
@@ -1700,31 +1765,31 @@ __global__ void genStreamlinesMerge_k(const ModelType model_type,
 
                 int stepsF;
                 const int tissue_classF = tracker_d<BDIM_X,
-                                                    BDIM_Y>(&st,
-							    model_type,
-						            max_angle,
-						            min_signal,
-							    tc_threshold,
-							    step_size,
-							    relative_peak_thres,
-							    min_separation_angle,
-                                                            seed,
-                                                            first_step,
-                                                            MAKE_REAL3(1, 1, 1),
-                                                            dimx, dimy, dimz, dimt, dataf,
-                                                            b0s_mask,
-                                                            H, R,
-                                                            metric_map,
-							    delta_nr,
-                                                            delta_b, delta_q, //fit_matrix
-							    samplm_nr,
-                                                            sampling_matrix,
-                                                            sphere_vertices,
-                                                            sphere_edges,
-                                                            num_edges,
-                                                            shDir1 + slid*samplm_nr,
-                                                            &stepsF,
-                                                            currSline + stepsB-1);
+                                                    BDIM_Y,
+                                                    MODEL_T>(&st,
+     	                    					             max_angle,
+				                        		             min_signal,
+		                            					     tc_threshold,
+	                            						     step_size,
+			                            				     relative_peak_thres,
+				                            			     min_separation_angle,
+                                                             seed,
+                                                             first_step,
+                                                             MAKE_REAL3(1, 1, 1),
+                                                             dimx, dimy, dimz, dimt, dataf,
+                                                             b0s_mask,
+                                                             H, R,
+                                                             metric_map,
+			                            				     delta_nr,
+                                                             delta_b, delta_q, //fit_matrix
+			                            				     samplm_nr,
+                                                             sampling_matrix,
+                                                             sphere_vertices,
+                                                             sphere_edges,
+                                                             num_edges,
+                                                             shDir1 + slid*samplm_nr,
+                                                             &stepsF,
+                                                             currSline + stepsB-1);
                 if (tidx == 0) {
                         slineLen[slineOff] = stepsB-1+stepsF;
                 }
@@ -1807,35 +1872,57 @@ void generate_streamlines_cuda_mgpu(const ModelType model_type, const REAL max_a
     dim3 grid(DIV_UP(nseeds_gpu, THR_X_BL/THR_X_SL));
 
     // Precompute number of streamlines before allocating memory
-    getNumStreamlines_k<THR_X_SL,
-                        THR_X_BL/THR_X_SL>
-                        <<<grid, block, shSizeGNS>>>(model_type,
-                                                     max_angle,
-						     min_signal,
-						     relative_peak_thresh,
-						     min_separation_angle,
-						     rng_seed,
-						     rng_offset + n*nseeds_per_gpu,
-						     nseeds_gpu,
-						     reinterpret_cast<const REAL3 *>(seeds_d[n]),
-						     dimx,
-						     dimy,
-						     dimz,
-						     dimt,
-						     dataf_d[n],
-						     H_d[n],
-						     R_d[n],
-						     delta_nr,
-						     delta_b_d[n],
-						     delta_q_d[n],
-						     b0s_mask_d[n],
-						     samplm_nr,
-						     sampling_matrix_d[n],
-						     reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]),
-						     reinterpret_cast<const int2 *>(sphere_edges_d[n]),
-						     nedges,
-						     shDirTemp0_d[n],
-						     slinesOffs_d[n]);
+    if (!((model_type == PTT) || (model_type == PROB))) {
+        getNumStreamlinesBoot_k<THR_X_SL,
+                                THR_X_BL/THR_X_SL>
+                                <<<grid, block, shSizeGNS>>>(
+                                        model_type,
+                                        max_angle,
+                                        min_signal,
+                                        relative_peak_thresh,
+                                        min_separation_angle,
+                                        rng_seed,
+                                        nseeds_gpu,
+                                        reinterpret_cast<const REAL3 *>(seeds_d[n]),
+                                        dimx,
+                                        dimy,
+                                        dimz,
+                                        dimt,
+                                        dataf_d[n],
+                                        H_d[n],
+                                        R_d[n],
+                                        delta_nr,
+                                        delta_b_d[n],
+                                        delta_q_d[n],
+                                        b0s_mask_d[n],
+                                        samplm_nr,
+                                        sampling_matrix_d[n],
+                                        reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]),
+                                        reinterpret_cast<const int2 *>(sphere_edges_d[n]),
+                                        nedges,
+                                        shDirTemp0_d[n],
+                                        slinesOffs_d[n]);
+    } else {
+        getNumStreamlinesProb_k<THR_X_SL,
+                                THR_X_BL/THR_X_SL>
+                                <<<grid, block, shSizeGNS>>>(
+                                        max_angle,
+                                        relative_peak_thresh,
+                                        min_separation_angle,
+                                        rng_seed,
+                                        nseeds_gpu,
+                                        reinterpret_cast<const REAL3 *>(seeds_d[n]),
+                                        dimx,
+                                        dimy,
+                                        dimz,
+                                        dimt,
+                                        dataf_d[n],
+                                        reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]),
+                                        reinterpret_cast<const int2 *>(sphere_edges_d[n]),
+                                        nedges,
+                                        shDirTemp0_d[n],
+                                        slinesOffs_d[n]);
+    }
   }
 
   std::vector<int> slinesOffs_h;
@@ -1921,52 +2008,58 @@ void generate_streamlines_cuda_mgpu(const ModelType model_type, const REAL max_a
     std::cerr << "Generating " << nSlines_h[n] << " streamlines (from " << nseeds_gpu << " seeds)" << std::endl; 
 #endif
 
-    if (model_type == PROB) {
-        // Shared memory requirements are smaller for probabilistic for main run
-        // than for preliminary run
-        shSizeGNS = sizeof(REAL)*(THR_X_BL/THR_X_SL)*n32dimt; 
-    } else if (model_type == PTT) {
-        // Potentially smaller shared memory requirements for PTT for main run
-        shSizeGNS = sizeof(REAL)*(THR_X_BL/THR_X_SL)*(DISC_VERT_CNT + DISC_FACE_CNT + 2*(9 + 1));
+    //fprintf(stderr, "Launching kernel with %u blocks of size (%u, %u)\n", grid.x, block.x, block.y);
+    switch(model_type) {
+        case OPDT:
+            genStreamlinesMerge_k<THR_X_SL, THR_X_BL/THR_X_SL, OPDT> <<<grid, block, shSizeGNS, streams[n]>>>(
+                max_angle, min_signal, tc_threshold, step_size, relative_peak_thresh, min_separation_angle,
+                rng_seed, rng_offset + n*nseeds_per_gpu, nseeds_gpu, reinterpret_cast<const REAL3 *>(seeds_d[n]),
+                dimx, dimy, dimz, dimt, dataf_d[n], H_d[n], R_d[n], delta_nr, delta_b_d[n], delta_q_d[n],
+                b0s_mask_d[n], metric_map_d[n], samplm_nr, sampling_matrix_d[n],
+                reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]), reinterpret_cast<const int2 *>(sphere_edges_d[n]),
+                nedges, slinesOffs_d[n], shDirTemp0_d[n], shDirTemp1_d[n], slineSeed_d[n], slineLen_d[n], sline_d[n]);
+            break;
+
+        case CSA:
+            genStreamlinesMerge_k<THR_X_SL, THR_X_BL/THR_X_SL, CSA> <<<grid, block, shSizeGNS, streams[n]>>>(
+                max_angle, min_signal, tc_threshold, step_size, relative_peak_thresh, min_separation_angle,
+                rng_seed, rng_offset + n*nseeds_per_gpu, nseeds_gpu, reinterpret_cast<const REAL3 *>(seeds_d[n]),
+                dimx, dimy, dimz, dimt, dataf_d[n], H_d[n], R_d[n], delta_nr, delta_b_d[n], delta_q_d[n],
+                b0s_mask_d[n], metric_map_d[n], samplm_nr, sampling_matrix_d[n],
+                reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]), reinterpret_cast<const int2 *>(sphere_edges_d[n]),
+                nedges, slinesOffs_d[n], shDirTemp0_d[n], shDirTemp1_d[n], slineSeed_d[n], slineLen_d[n], sline_d[n]);
+            break;
+
+        case PROB:
+            // Shared memory requirements are smaller for probabilistic for main run
+            // than for preliminary run
+            shSizeGNS = sizeof(REAL)*(THR_X_BL/THR_X_SL)*n32dimt;
+            genStreamlinesMerge_k<THR_X_SL, THR_X_BL/THR_X_SL, PROB> <<<grid, block, shSizeGNS, streams[n]>>>(
+                max_angle, min_signal, tc_threshold, step_size, relative_peak_thresh, min_separation_angle,
+                rng_seed, rng_offset + n*nseeds_per_gpu, nseeds_gpu, reinterpret_cast<const REAL3 *>(seeds_d[n]),
+                dimx, dimy, dimz, dimt, dataf_d[n], H_d[n], R_d[n], delta_nr, delta_b_d[n], delta_q_d[n],
+                b0s_mask_d[n], metric_map_d[n], samplm_nr, sampling_matrix_d[n],
+                reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]), reinterpret_cast<const int2 *>(sphere_edges_d[n]),
+                nedges, slinesOffs_d[n], shDirTemp0_d[n], shDirTemp1_d[n], slineSeed_d[n], slineLen_d[n], sline_d[n]);
+            break;
+
+        case PTT:
+            // Potentially smaller shared memory requirements for PTT for main run
+            shSizeGNS = sizeof(REAL)*(THR_X_BL/THR_X_SL)*(DISC_VERT_CNT + DISC_FACE_CNT + 2*(9 + 1));
+            genStreamlinesMerge_k<THR_X_SL, THR_X_BL/THR_X_SL, PTT> <<<grid, block, shSizeGNS, streams[n]>>>(
+                max_angle, min_signal, tc_threshold, step_size, relative_peak_thresh, min_separation_angle,
+                rng_seed, rng_offset + n*nseeds_per_gpu, nseeds_gpu, reinterpret_cast<const REAL3 *>(seeds_d[n]),
+                dimx, dimy, dimz, dimt, dataf_d[n], H_d[n], R_d[n], delta_nr, delta_b_d[n], delta_q_d[n],
+                b0s_mask_d[n], metric_map_d[n], samplm_nr, sampling_matrix_d[n],
+                reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]), reinterpret_cast<const int2 *>(sphere_edges_d[n]),
+                nedges, slinesOffs_d[n], shDirTemp0_d[n], shDirTemp1_d[n], slineSeed_d[n], slineLen_d[n], sline_d[n]);
+            break;
+
+        default:
+            printf("FATAL: Invalid Model Type.\n");
+            break;
     }
 
-    //fprintf(stderr, "Launching kernel with %u blocks of size (%u, %u)\n", grid.x, block.x, block.y);
-    genStreamlinesMerge_k<THR_X_SL,
-                          THR_X_BL/THR_X_SL>
-                          <<<grid, block, shSizeGNS, streams[n]>>>(model_type,
-								   max_angle,
-								   min_signal,
-								   tc_threshold,
-								   step_size,
-								   relative_peak_thresh,
-								   min_separation_angle,
-								   rng_seed,
-								   rng_offset + n*nseeds_per_gpu,
-								   nseeds_gpu,
-								   reinterpret_cast<const REAL3 *>(seeds_d[n]),
-								   dimx,
-								   dimy,
-								   dimz,
-								   dimt,
-								   dataf_d[n],
-								   H_d[n],
-								   R_d[n],
-								   delta_nr,
-								   delta_b_d[n],
-								   delta_q_d[n],
-								   b0s_mask_d[n],
-								   metric_map_d[n],
-								   samplm_nr,
-								   sampling_matrix_d[n],
-								   reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]),
-								   reinterpret_cast<const int2 *>(sphere_edges_d[n]),
-								   nedges,
-								   slinesOffs_d[n],
-								   shDirTemp0_d[n],
-								   shDirTemp1_d[n],
-								   slineSeed_d[n],
-								   slineLen_d[n],
-								   sline_d[n]);
     CHECK_ERROR("genStreamlinesMerge_k");
   }
 
