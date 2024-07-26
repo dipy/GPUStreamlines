@@ -7,7 +7,7 @@
 #define STEP_FRAC 20 // divides output step size (usually 0.5) into this many internal steps
 #define PROBE_FRAC 2 // divides output step size (usually 0.5) to find probe length
 #define PROBE_QUALITY 4
-#define SAMPLING_QUALITY 4 // can be 2-7, should be at least 4 to take advantage of GPUs
+#define SAMPLING_QUALITY 4 // can be 2-7
 #define PROBABILISTIC_BIAS 1 // 1 looks good. can be 0-log_2(N_WARPS) (typically 0-5). 0 is fully probabilistic, 4 is close to deterministic.
 #define ALLOW_WEAK_LINK 1
 #define INIT_FRAME_TRIES 16
