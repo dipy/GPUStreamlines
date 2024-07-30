@@ -6,6 +6,16 @@ __device__ void prefix_sum_sh_d(REAL_T *num_sh, int __len) {
     const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
     const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
 
+#if 0
+    // for debugging
+    __syncwarp(WMASK);
+    if (tidx == 0) {
+        for (int j = 1; j < __len; j++) {
+            num_sh[j] += num_sh[j-1];
+        }
+    }
+    __syncwarp(WMASK);
+#else
     for (int j = 0; j < __len; j += BDIM_X) {
         if ((tidx == 0) && (j != 0)) {
             num_sh[j] += num_sh[j-1];
@@ -27,6 +37,7 @@ __device__ void prefix_sum_sh_d(REAL_T *num_sh, int __len) {
         }
         __syncwarp(WMASK);
     }
+#endif
 }
 
 template<typename REAL_T>
@@ -47,6 +58,26 @@ __device__ void printArray(const char *name, int ncol, int n, REAL_T *arr) {
 	}
 }
 
+template<typename REAL_T>
+__device__ REAL_T interpolation_helper_d(const REAL_T* dataf, const REAL_T wgh[3][2], const long long coo[3][2], int dimy, int dimz, int dimt, int t) {
+    REAL_T __tmp = 0;
+    #pragma unroll
+    for (int i = 0; i < 2; i++) {
+        #pragma unroll
+        for (int j = 0; j < 2; j++) {
+            #pragma unroll
+            for (int k = 0; k < 2; k++) {
+                __tmp += wgh[0][i] * wgh[1][j] * wgh[2][k] *
+                         dataf[coo[0][i] * dimy * dimz * dimt +
+                               coo[1][j] * dimz * dimt +
+                               coo[2][k] * dimt +
+                               t];
+            }
+        }
+    }
+    return __tmp;
+}
+
 template<int BDIM_X,
          typename REAL_T,
          typename REAL3_T>
@@ -54,7 +85,7 @@ __device__ int trilinear_interp_d(const int dimx,
                                   const int dimy,
                                   const int dimz,
                                   const int dimt,
-                                  int dimt_start_idx,
+                                  int dimt_idx, // If -1, get all
                                   const REAL_T *__restrict__ dataf,
                                   const REAL3_T point,
                                   REAL_T *__restrict__ __vox_data) {
@@ -91,44 +122,12 @@ __device__ int trilinear_interp_d(const int dimx,
         coo[2][0] = MAX(0, fl.z);
         coo[2][1] = MIN(dimz-1, coo[2][0]+1);
 
-        if (BDIM_X == 1) { // Whether this is being multithreaded
-                REAL_T __tmp = 0;
-                #pragma unroll
-                for(int i = 0; i < 2; i++) {
-                        #pragma unroll
-                        for(int j = 0; j < 2; j++) {
-                                #pragma unroll
-                                for(int k = 0; k < 2; k++) {
-                                        __tmp += wgh[0][i]*wgh[1][j]*wgh[2][k]*
-                                                dataf[coo[0][i]*dimy*dimz*dimt +
-                                                coo[1][j]*dimz*dimt +
-                                                coo[2][k]*dimt +
-                                                dimt_start_idx];
-                                }
-                        }
+        if (dimt_idx == -1) {
+                for (int t = threadIdx.x; t < dimt; t += BDIM_X) {
+                        __vox_data[t] = interpolation_helper_d(dataf, wgh, coo, dimy, dimz, dimt, t);
                 }
-                __vox_data[0] = __tmp;
         } else {
-                for(int t = dimt_start_idx + threadIdx.x; t < dimt; t += BDIM_X) {
-
-                        REAL_T __tmp = 0;
-
-                        #pragma unroll
-                        for(int i = 0; i < 2; i++) {
-                                #pragma unroll
-                                for(int j = 0; j < 2; j++) {
-                                        #pragma unroll
-                                        for(int k = 0; k < 2; k++) {
-                                                __tmp += wgh[0][i]*wgh[1][j]*wgh[2][k]*
-                                                        dataf[coo[0][i]*dimy*dimz*dimt +
-                                                        coo[1][j]*dimz*dimt +
-                                                        coo[2][k]*dimt +
-                                                        t];
-                                        }
-                                }
-                        }
-                        __vox_data[t] = __tmp;
-                }
+                *__vox_data = interpolation_helper_d(dataf, wgh, coo, dimy, dimz, dimt, dimt_idx);
         }
 
         /*

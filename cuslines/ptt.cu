@@ -37,8 +37,7 @@ __device__ REAL_T interp4_d(const REAL3_T pos, const REAL_T* frame, const REAL_T
         }
     }
 
-    const int rv = trilinear_interp_d<1>(dimx, dimy, dimz, dimt, closest_odf_idx,
-                                         pmf, pos, &__max_cos);
+    const int rv = trilinear_interp_d<THR_X_SL>(dimx, dimy, dimz, dimt, closest_odf_idx, pmf, pos, &__max_cos);
 
 #if 0
     printf("inerpolated %f at %f, %f, %f, %i\n", __max_cos, pos.x, pos.y, pos.z, closest_odf_idx);
@@ -186,6 +185,7 @@ __device__ int get_direction_ptt_d(
     const REAL_T max_angle,
     const REAL_T step_size,
     REAL3_T dir,
+    REAL_T *__frame_sh,
     const int dimx, const int dimy, const int dimz, const int dimt,
     REAL3_T pos,
     const REAL3_T *__restrict__ odf_sphere_vertices,
@@ -204,23 +204,20 @@ __device__ int get_direction_ptt_d(
     const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
     const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
 
-	extern REAL_T __shared__ __sh[];
+	REAL_T __shared__ face_cdf_sh[BDIM_Y*DISC_FACE_CNT];
+    REAL_T __shared__ vert_pdf_sh[BDIM_Y*DISC_VERT_CNT];
+    REAL_T __shared__ first_val_sh[BDIM_Y];
 
-    REAL_T *__face_cdf_sh = reinterpret_cast<REAL_T *>(__sh);
-    REAL_T *__vert_pdf_sh = __face_cdf_sh + BDIM_Y*DISC_FACE_CNT; // These first two can be overwritten in other functions
-    REAL_T *__frame_sh = __vert_pdf_sh + BDIM_Y*DISC_VERT_CNT; // the rest must persist form call to call
-    REAL_T *__first_val_sh = __frame_sh + BDIM_Y*9;
-
-    __face_cdf_sh += tidy*DISC_FACE_CNT;
-    __vert_pdf_sh += tidy*DISC_VERT_CNT; 
-    __frame_sh += tidy*9;
-    __first_val_sh += tidy*1;
+    REAL_T *__face_cdf_sh = face_cdf_sh + tidy*DISC_FACE_CNT;
+    REAL_T *__vert_pdf_sh = vert_pdf_sh + tidy*DISC_VERT_CNT;
+    REAL_T *__first_val_sh = first_val_sh + tidy;
 
     const REAL_T max_curvature = SIN(max_angle / 2) / step_size; // bigger numbers means wiggle more
     const REAL_T probe_step_size = ((step_size / 2) / (PROBE_QUALITY - 1));
 
     REAL_T __tmp;
 
+    __syncwarp(WMASK);
     if (IS_INIT) {
         if (tidx==0) {
             __frame_sh[0] = dir.x;
@@ -410,3 +407,73 @@ __device__ int get_direction_ptt_d(
 }
 
 
+template<int BDIM_X,
+         int BDIM_Y,
+         typename REAL_T,
+         typename REAL3_T>
+__device__ bool init_frame_ptt_d(
+    curandStatePhilox4_32_10_t *st,
+    const REAL_T *__restrict__ pmf,
+    const REAL_T max_angle,
+    const REAL_T step_size,
+    REAL3_T first_step,
+    const int dimx, const int dimy, const int dimz, const int dimt,
+    REAL3_T seed,
+    const REAL3_T *__restrict__ sphere_vertices,
+    REAL_T* __frame) {
+    const int tidx = threadIdx.x;
+
+    const int lid = (threadIdx.y*BDIM_X + tidx) % 32;
+    const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
+
+    bool init_norm_success;
+    REAL3_T tmp;
+
+    // Here we probabilistic find a good intial normal for this initial direction 
+    init_norm_success = (bool) get_direction_ptt_d<BDIM_X, BDIM_Y, 1>(
+        st,
+        pmf,
+        max_angle,
+        step_size,
+        MAKE_REAL3(-first_step.x, -first_step.y, -first_step.z),
+        __frame,
+        dimx, dimy, dimz, dimt,
+        seed,
+        sphere_vertices,
+        &tmp);
+    __syncwarp(WMASK);
+
+    if (!init_norm_success) {
+        // try the other direction
+        init_norm_success = (bool) get_direction_ptt_d<BDIM_X, BDIM_Y, 1>(
+            st,
+            pmf,
+            max_angle,
+            step_size,
+            MAKE_REAL3(first_step.x, first_step.y, first_step.z),
+            __frame,
+            dimx, dimy, dimz, dimt,
+            seed,
+            sphere_vertices,
+            &tmp);
+        __syncwarp(WMASK);
+
+        if (!init_norm_success) { // This is rare
+            return false;
+        } else {
+            if (tidx == 0) {
+                for (int ii = 0; ii < 9; ii++) {
+                    __frame[ii] = -__frame[ii];
+                }
+            }
+            __syncwarp(WMASK);
+        }
+    }
+    if (tidx == 0) {
+        for (int ii = 0; ii < 9; ii++) {
+            __frame[9+ii] = -__frame[ii]; // save flipped frame for second run
+        }
+    }
+    __syncwarp(WMASK);
+    return true;
+}

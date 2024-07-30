@@ -732,21 +732,13 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
 
 	const int n32dimt = ((dimt+31)/32)*32;
 
-	extern REAL_T __shared__ __sh[];
-
-	REAL_T *__pmf_data_sh = reinterpret_cast<REAL_T *>(__sh);
-        int *__shInd;
-        if (IS_START) {
-	        __shInd = reinterpret_cast<int *>(__pmf_data_sh + BDIM_Y*n32dimt);
-        }
-
-	__pmf_data_sh += tidy*n32dimt;
-        if (IS_START) {
-	        __shInd += tidy*n32dimt;
-        }
+	extern __shared__ REAL_T __sh[];
+        REAL_T *__pmf_data_sh = __sh + tidy*n32dimt;
 
         // pmf = self.pmf_gen.get_pmf_c(&point[0], pmf)
-        const int rv = trilinear_interp_d<BDIM_X>(dimx, dimy, dimz, dimt, 0, pmf, point, __pmf_data_sh);
+        __syncwarp(WMASK);
+        const int rv = trilinear_interp_d<BDIM_X>(dimx, dimy, dimz, dimt, -1, pmf, point, __pmf_data_sh);
+        __syncwarp(WMASK);
         if (rv != 0) {
                 return 0;
         }
@@ -761,6 +753,7 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
         // for i in range(_len):
         //     if pmf[i] < absolute_pmf_threshold:
         //         pmf[i] = 0.0
+        #pragma unroll
         for(int i = tidx; i < dimt; i += BDIM_X) {
                 if (__pmf_data_sh[i] < absolpmf_thresh) {
                         __pmf_data_sh[i] = 0.0;
@@ -769,6 +762,7 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
         __syncwarp(WMASK);
 
         if (IS_START) {
+                int *__shInd = reinterpret_cast<int *>(__sh + BDIM_Y*n32dimt) + tidy*n32dimt;
                 return peak_directions_d<BDIM_X,
                                          BDIM_Y>(__pmf_data_sh,
                                                  dirs,
@@ -788,9 +782,19 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                                 printf("absolpmf_thresh %10.8f\n", absolpmf_thresh);
                                 printf("--->            dir %10.8f, %10.8f, %10.8f\n", dir.x, dir.y, dir.z);
                                 printf("--->            point %10.8f, %10.8f, %10.8f\n", point.x, point.y, point.z);
-                                if (sqrt(dir.x*dir.x + dir.y*dir.y + dir.z*dir.z) >= 1.05){
-                                        printf("ERROR dir %10.8f, %10.8f, %10.8f\n", dir.x, dir.y, dir.z);
-                                }
+                        }
+                        __syncwarp(WMASK);
+                        if (tidx == 15) {
+                                printf("absolpmf_thresh %10.8f l15\n", absolpmf_thresh);
+                                printf("--->            dir %10.8f, %10.8f, %10.8f l15\n", dir.x, dir.y, dir.z);
+                                printf("--->            point %10.8f, %10.8f, %10.8f l15\n", point.x, point.y, point.z);
+                        }
+                        __syncwarp(WMASK);
+                        if (tidx == 31) {
+                                printArray("__pmf_data_sh initial l31", 8, dimt, __pmf_data_sh);
+                                printf("absolpmf_thresh %10.8f l31\n", absolpmf_thresh);
+                                printf("--->            dir %10.8f, %10.8f, %10.8f l31\n", dir.x, dir.y, dir.z);
+                                printf("--->            point %10.8f, %10.8f, %10.8f l31\n", point.x, point.y, point.z);
                         }
                         __syncwarp(WMASK);
                 #endif
@@ -810,6 +814,7 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                 //                 pmf[i] = 0
                 const REAL_T cos_similarity = COS(max_angle);
 
+                #pragma unroll
                 for(int i = tidx; i < dimt; i += BDIM_X) {
                         const REAL_T dot = dir.x*sphere_vertices[i].x+
                                            dir.y*sphere_vertices[i].y+
@@ -853,15 +858,35 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                         __tmp = curand_uniform(st) * last_cdf;
                 }
                 REAL_T selected_cdf = __shfl_sync(WMASK, __tmp, 0, BDIM_X);
-
+// Both these implementations work
+#if 1
+                int low = 0;
+                int high = dimt - 1;
+                while ((high - low) >= BDIM_X) {
+                        const int mid = (low + high) / 2;
+                        if (__pmf_data_sh[mid] < selected_cdf) {
+                                low = mid;
+                        } else {
+                                high = mid;
+                        }
+                }
+                const bool __ballot = (low+tidx <= high) ? (selected_cdf < __pmf_data_sh[low+tidx]) : 0;
+                const int __msk = __ballot_sync(WMASK, __ballot);
+                const int indProb = low + __ffs(__msk) - 1;
+#else
                 int indProb = dimt - 1;
                 for (int ii = 0; ii < dimt; ii+=BDIM_X) {
-                        int __msk = __ballot_sync(WMASK, selected_cdf < __pmf_data_sh[ii+tidx]);
+                        int __is_greater = 0;
+                        if (ii+tidx < dimt) {
+                                __is_greater = selected_cdf < __pmf_data_sh[ii+tidx];
+                        }
+                        const int __msk = __ballot_sync(WMASK, __is_greater);
                         if (__msk != 0) {
                                 indProb = ii + __ffs(__msk) - 1;
                                 break;
                         }
                 }
+#endif
 
                 #ifdef DEBUG
                         __syncwarp(WMASK);
@@ -887,28 +912,37 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                         if ((dir.x * sphere_vertices[indProb].x +
                              dir.y * sphere_vertices[indProb].y +
                              dir.z * sphere_vertices[indProb].z) > 0) {
-                                dirs[0] = MAKE_REAL3(sphere_vertices[indProb].x,
-                                                     sphere_vertices[indProb].y,
-                                                     sphere_vertices[indProb].z);
+                                *dirs = MAKE_REAL3(sphere_vertices[indProb].x,
+                                                   sphere_vertices[indProb].y,
+                                                   sphere_vertices[indProb].z);
                         } else {
-                                dirs[0] = MAKE_REAL3(-sphere_vertices[indProb].x,
-                                                     -sphere_vertices[indProb].y,
-                                                     -sphere_vertices[indProb].z);
+                                *dirs = MAKE_REAL3(-sphere_vertices[indProb].x,
+                                                   -sphere_vertices[indProb].y,
+                                                   -sphere_vertices[indProb].z);
                         }
+                        // printf("direction addr write %p, slid %i\n", dirs, blockIdx.x*blockDim.y+threadIdx.y);
                 }
 
                 #ifdef DEBUG
+                        __syncwarp(WMASK);
                         if (tidx == 0) {
-                                if ((dirs[0].x == dir.x) && (dirs[0].y == dir.y) && (dirs[0].z == dir.z)) {
-                                printf("ERROR dir %10.8f, %10.8f, %10.8f\n", dirs[0].x, dirs[0].y, dirs[0].z);
                                 printf("last_cdf %10.8f\n", last_cdf);
                                 printf("selected_cdf %10.8f\n", selected_cdf);
                                 printf("indProb %i out of %i\n", indProb, dimt);
-                                }
-                                if (sqrt(dirs[0].x*dirs[0].x + dirs[0].y*dirs[0].y + dirs[0].z*dirs[0].z) >= 1.1) {
-                                        printf("ERROR dir %10.8f, %10.8f, %10.8f\n", dirs[0].x, dirs[0].y, dirs[0].z);
-                                }
                         }
+                        __syncwarp(WMASK);
+                        if (tidx == 15) {
+                                printf("last_cdf %10.8f l15\n", last_cdf);
+                                printf("selected_cdf %10.8f l15\n", selected_cdf);
+                                printf("indProb %i out of %i l15\n", indProb, dimt);
+                        }
+                        __syncwarp(WMASK);
+                        if (tidx == 31) {
+                                printf("last_cdf %10.8f l31\n", last_cdf);
+                                printf("selected_cdf %10.8f l31\n", selected_cdf);
+                                printf("indProb %i out of %i l31\n", indProb, dimt);
+                        }
+                        __syncwarp(WMASK);
                 #endif
                 return 1;
         }
@@ -987,7 +1021,7 @@ __device__ int get_direction_boot_d(
         #pragma unroll
         for(int i = 0; i < NATTEMPTS; i++) {
 
-                const int rv = trilinear_interp_d<BDIM_X>(dimx, dimy, dimz, dimt, 0, dataf, point, __vox_data_sh);
+                const int rv = trilinear_interp_d<BDIM_X>(dimx, dimy, dimz, dimt, -1, dataf, point, __vox_data_sh);
 
 		const int nmsk = maskGet<BDIM_X>(dimt, b0s_mask, __vox_data_sh, __msk_data_sh);
 
@@ -1201,6 +1235,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
 			 const REAL_T min_separation_angle,
                          REAL3_T seed,
                          REAL3_T first_step,
+                         REAL_T* ptt_frame,
                          REAL3_T voxel_size,
                          const int dimx,
                          const int dimy,
@@ -1226,12 +1261,11 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                          const REAL3_T *__restrict__ sphere_vertices,
                          const int2 *__restrict__ sphere_edges,
                          const int num_edges,
-                         REAL3_T *__restrict__ __shDir,
                          int *__restrict__ nsteps,
                          REAL3_T *__restrict__ streamline) {
 
         const int tidx = threadIdx.x;
-        //const int tidy = threadIdx.y;
+        const int tidy = threadIdx.y;
 
         const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
         const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
@@ -1240,6 +1274,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
 
         REAL3_T point = seed;
         REAL3_T direction = first_step;
+        __shared__ REAL3_T __sh_new_dir[BDIM_Y];
 
         if (tidx == 0) {
                 streamline[0] = point;
@@ -1276,7 +1311,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                                                         sphere_vertices,
                                                         sphere_edges,
                                                         num_edges,
-                                                        __shDir);
+                                                        __sh_new_dir + tidy);
                 } else if (MODEL_T == PTT) {
                         ndir = get_direction_ptt_d<BDIM_X,
                                                    BDIM_Y,
@@ -1286,10 +1321,11 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                                                         max_angle,
                                                         step_size,
                                                         direction,
+                                                        ptt_frame,
                                                         dimx, dimy, dimz, dimt,
                                                         point,
                                                         sphere_vertices,
-                                                        __shDir);
+                                                        __sh_new_dir + tidy);
                 } else {
                         // call get_direction_boot_d() with NATTEMPTS=5
                         ndir = get_direction_boot_d<BDIM_X,
@@ -1317,10 +1353,10 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                                                         sphere_vertices,
                                                         sphere_edges,
                                                         num_edges,
-                                                        __shDir);
+                                                        __sh_new_dir + tidy);
                 }
                 __syncwarp(WMASK);
-                direction = __shDir[0];
+                direction = __sh_new_dir[tidy];
                 __syncwarp(WMASK);
 
                 if (ndir == 0) {
@@ -1350,6 +1386,37 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                 __syncwarp(WMASK);
 
                 tissue_class = check_point_d<BDIM_X, BDIM_Y>(tc_threshold, point, dimx, dimy, dimz, metric_map);
+
+#if 0
+                __syncwarp(WMASK);
+                if (tidx == 0) {
+                        printf("step_size %f\n", step_size);
+                        printf("direction %f, %f, %f\n", direction.x, direction.y, direction.z);
+                        printf("direction addr read %p, slid %i\n", __shDir, blockIdx.x*blockDim.y+threadIdx.y);
+                        printf("voxel_size %f, %f, %f\n", voxel_size.x, voxel_size.y, voxel_size.z);
+                        printf("point %f, %f, %f\n", point.x, point.y, point.z);
+                        printf("tc %i\n", tissue_class);
+                }
+                __syncwarp(WMASK);
+                if (tidx == 15) {
+                        printf("step_size %f l15\n", step_size);
+                        printf("direction %f, %f, %f l15\n", direction.x, direction.y, direction.z);
+                        printf("direction addr read %p, slid %i l15\n", __shDir, blockIdx.x*blockDim.y+threadIdx.y);
+                        printf("voxel_size %f, %f, %f l15\n", voxel_size.x, voxel_size.y, voxel_size.z);
+                        printf("point %f, %f, %f l15\n", point.x, point.y, point.z);
+                        printf("tc %i l15\n", tissue_class);
+                }
+                __syncwarp(WMASK);
+                if (tidx == 31) {
+                        printf("step_size %f l31\n", step_size);
+                        printf("direction %f, %f, %f l31\n", direction.x, direction.y, direction.z);
+                        printf("direction addr read %p, slid %i l31\n", __shDir, blockIdx.x*blockDim.y+threadIdx.y);
+                        printf("voxel_size %f, %f, %f l31\n", voxel_size.x, voxel_size.y, voxel_size.z);
+                        printf("point %f, %f, %f l31\n", point.x, point.y, point.z);
+                        printf("tc %i l31\n", tissue_class);
+                }
+                __syncwarp(WMASK);
+#endif
 
                 if (tissue_class == ENDPOINT ||
                     tissue_class == INVALIDPOINT ||
@@ -1588,7 +1655,6 @@ __global__ void genStreamlinesMerge_k(
                                       const int num_edges,
                                       const int    *__restrict__ slineOutOff,
                                             REAL3_T *__restrict__ shDir0,
-                                            REAL3_T *__restrict__ shDir1,
                                             int     *__restrict__ slineSeed,
                                             int     *__restrict__ slineLen,
                                             REAL3_T *__restrict__ sline) {
@@ -1601,8 +1667,8 @@ __global__ void genStreamlinesMerge_k(
         const int lid = (tidy*BDIM_X + tidx) % 32;
         const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
 
-        extern REAL_T __shared__ __sh[];
-
+        __shared__ REAL_T frame_sh[((MODEL_T == PTT) ? BDIM_Y*18 : 1)]; // Only used by PTT, TODO: way to remove this in other cases
+        REAL_T* __ptt_frame = frame_sh + tidy*18;
 	// const int hr_side = dimt-1;
 
         curandStatePhilox4_32_10_t st;
@@ -1646,66 +1712,25 @@ __global__ void genStreamlinesMerge_k(
 #endif
 
                 if (MODEL_T == PTT) {
-                        bool init_norm_success;
-                        // Here we probabilistic find a good intial normal for this initial direction 
-                        init_norm_success = (bool) get_direction_ptt_d<BDIM_X,
-                                                                       BDIM_Y,
-                                                                       1>(
-                                                                                &st,
-                                                                                dataf,
-                                                                                max_angle,
-                                                                                step_size,
-                                                                                MAKE_REAL3(-first_step.x, -first_step.y, -first_step.z),
-                                                                                dimx, dimy, dimz, dimt,
-                                                                                seed,
-                                                                                sphere_vertices,
-                                                                                shDir1 + slid*samplm_nr);
-
-                        __syncwarp(WMASK);
-                        if (!init_norm_success) {
-                                // try the other direction
-                                init_norm_success = (bool) get_direction_ptt_d<BDIM_X,
-                                                                               BDIM_Y,
-                                                                               1>(
-                                                                                        &st,
-                                                                                        dataf,
-                                                                                        max_angle,
-                                                                                        step_size,
-                                                                                        MAKE_REAL3(first_step.x, first_step.y, first_step.z),
-                                                                                        dimx, dimy, dimz, dimt,
-                                                                                        seed,
-                                                                                        sphere_vertices,
-                                                                                        shDir1 + slid*samplm_nr);
+                        if (!init_frame_ptt_d<BDIM_X, BDIM_Y>(
+                                &st,
+                                dataf,
+                                max_angle,
+                                step_size,
+                                first_step,
+                                dimx, dimy, dimz, dimt,
+                                seed,
+                                sphere_vertices,
+                                __ptt_frame
+                        )) { // this fails rarely
+                                if (tidx == 0) {
+                                        slineLen[slineOff] = 1;
+                                        currSline[0] = seed;
+                                }
                                 __syncwarp(WMASK);
-                                if (!init_norm_success) { // This is rare
-#if 0
-                                        printf("PTT init seed failed");
-#endif
-                                        if (tidx == 0) {
-                                                slineLen[slineOff] = 1;
-                                                currSline[0] = seed;
-                                        }
-                                        slineOff += 1;
-                                        continue;
-                                } else {
-                                        if (tidx == 0) {
-                                                REAL_T *sh_frame_ptr = reinterpret_cast<REAL_T *>(__sh) + BDIM_Y*(DISC_VERT_CNT + DISC_FACE_CNT);
-                                                for (int ii = 0; ii < 9; ii++) {
-                                                        sh_frame_ptr[ii + 9*tidy] = -sh_frame_ptr[ii + 9*tidy]; // flip frame
-                                                }
-                                        }
-                                }
+                                slineOff += 1;
+                                continue;
                         }
-                        if (tidx == 0) {
-                                // We need to save the frames for the forwards step, and reverse them for the backwards step
-                                REAL_T *sh_ptr = reinterpret_cast<REAL_T *>(__sh) + BDIM_Y*(DISC_VERT_CNT + DISC_FACE_CNT);
-                                REAL_T *sh_ptr_to_save = reinterpret_cast<REAL_T *>(__sh) + BDIM_Y*(DISC_VERT_CNT + DISC_FACE_CNT + 9 + 1);
-                
-                                for (int ii = 0; ii < 9; ii++) {
-                                        sh_ptr_to_save[ii + 9*tidy] = -sh_ptr[ii + 9*tidy]; // frame
-                                }
-                        }
-                        __syncwarp(WMASK);
                 }
 
 
@@ -1721,6 +1746,7 @@ __global__ void genStreamlinesMerge_k(
 	                        			     min_separation_angle,
                                                              seed,
                                                              MAKE_REAL3(-first_step.x, -first_step.y, -first_step.z),
+                                                             __ptt_frame,
                                                              MAKE_REAL3(1, 1, 1),
                                                              dimx, dimy, dimz, dimt, dataf,
                                                              b0s_mask,
@@ -1733,7 +1759,6 @@ __global__ void genStreamlinesMerge_k(
                                                              sphere_vertices,
                                                              sphere_edges,
                                                              num_edges,
-                                                             shDir1 + slid*samplm_nr,
                                                              &stepsB,
                                                              currSline);
                 //if (tidx == 0) {
@@ -1749,20 +1774,6 @@ __global__ void genStreamlinesMerge_k(
                         }
                 }
 
-                if (MODEL_T == PTT) {
-                        __syncwarp(WMASK);
-                        if (tidx == 0) {
-                                // Setup the forwards step using parameters saved from backwards step
-                                REAL_T *sh_ptr = reinterpret_cast<REAL_T *>(__sh) + BDIM_Y*(DISC_VERT_CNT + DISC_FACE_CNT);
-                                REAL_T *sh_ptr_saved = reinterpret_cast<REAL_T *>(__sh) + BDIM_Y*(DISC_VERT_CNT + DISC_FACE_CNT + 9 + 1);
-
-                                for (int ii = 0; ii < 9; ii++) {
-                                        sh_ptr[ii + 9*tidy] = sh_ptr_saved[ii + 9*tidy]; // frame
-                                }
-                        }
-                        __syncwarp(WMASK);
-                }
-
                 int stepsF;
                 const int tissue_classF = tracker_d<BDIM_X,
                                                     BDIM_Y,
@@ -1775,6 +1786,7 @@ __global__ void genStreamlinesMerge_k(
 			            			     min_separation_angle,
                                                              seed,
                                                              first_step,
+                                                             __ptt_frame + 9,
                                                              MAKE_REAL3(1, 1, 1),
                                                              dimx, dimy, dimz, dimt, dataf,
                                                              b0s_mask,
@@ -1787,7 +1799,6 @@ __global__ void genStreamlinesMerge_k(
                                                              sphere_vertices,
                                                              sphere_edges,
                                                              num_edges,
-                                                             shDir1 + slid*samplm_nr,
                                                              &stepsF,
                                                              currSline + stepsB-1);
                 if (tidx == 0) {
@@ -1834,7 +1845,6 @@ void generate_streamlines_cuda_mgpu(const ModelType model_type, const REAL max_a
 
   std::vector<int*> slinesOffs_d(ngpus, nullptr);
   std::vector<REAL3*> shDirTemp0_d(ngpus, nullptr);
-  std::vector<REAL3*> shDirTemp1_d(ngpus, nullptr);
 
   //#pragma omp parallel for
   for (int n = 0; n < ngpus; ++n) {
@@ -1845,7 +1855,6 @@ void generate_streamlines_cuda_mgpu(const ModelType model_type, const REAL max_a
 
     CHECK_CUDA(cudaMalloc(&slinesOffs_d[n], sizeof(*slinesOffs_d[n])*(nseeds_gpu+1)));
     CHECK_CUDA(cudaMalloc(&shDirTemp0_d[n], sizeof(*shDirTemp0_d[n])*samplm_nr*grid.x*block.y));
-    CHECK_CUDA(cudaMalloc(&shDirTemp1_d[n], sizeof(*shDirTemp1_d[n])*samplm_nr*grid.x*block.y));
   }
 
   int n32dimt = ((dimt+31)/32)*32;
@@ -2008,7 +2017,7 @@ void generate_streamlines_cuda_mgpu(const ModelType model_type, const REAL max_a
                 dimx, dimy, dimz, dimt, dataf_d[n], H_d[n], R_d[n], delta_nr, delta_b_d[n], delta_q_d[n],
                 b0s_mask_d[n], metric_map_d[n], samplm_nr, sampling_matrix_d[n],
                 reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]), reinterpret_cast<const int2 *>(sphere_edges_d[n]),
-                nedges, slinesOffs_d[n], shDirTemp0_d[n], shDirTemp1_d[n], slineSeed_d[n], slineLen_d[n], sline_d[n]);
+                nedges, slinesOffs_d[n], shDirTemp0_d[n], slineSeed_d[n], slineLen_d[n], sline_d[n]);
             break;
 
         case CSA:
@@ -2018,7 +2027,7 @@ void generate_streamlines_cuda_mgpu(const ModelType model_type, const REAL max_a
                 dimx, dimy, dimz, dimt, dataf_d[n], H_d[n], R_d[n], delta_nr, delta_b_d[n], delta_q_d[n],
                 b0s_mask_d[n], metric_map_d[n], samplm_nr, sampling_matrix_d[n],
                 reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]), reinterpret_cast<const int2 *>(sphere_edges_d[n]),
-                nedges, slinesOffs_d[n], shDirTemp0_d[n], shDirTemp1_d[n], slineSeed_d[n], slineLen_d[n], sline_d[n]);
+                nedges, slinesOffs_d[n], shDirTemp0_d[n], slineSeed_d[n], slineLen_d[n], sline_d[n]);
             break;
 
         case PROB:
@@ -2031,19 +2040,18 @@ void generate_streamlines_cuda_mgpu(const ModelType model_type, const REAL max_a
                 dimx, dimy, dimz, dimt, dataf_d[n], H_d[n], R_d[n], delta_nr, delta_b_d[n], delta_q_d[n],
                 b0s_mask_d[n], metric_map_d[n], samplm_nr, sampling_matrix_d[n],
                 reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]), reinterpret_cast<const int2 *>(sphere_edges_d[n]),
-                nedges, slinesOffs_d[n], shDirTemp0_d[n], shDirTemp1_d[n], slineSeed_d[n], slineLen_d[n], sline_d[n]);
+                nedges, slinesOffs_d[n], shDirTemp0_d[n], slineSeed_d[n], slineLen_d[n], sline_d[n]);
             break;
 
         case PTT:
-            // Potentially smaller shared memory requirements for PTT for main run
-            shSizeGNS = sizeof(REAL)*(THR_X_BL/THR_X_SL)*(DISC_VERT_CNT + DISC_FACE_CNT + 2*(9 + 1));
+            shSizeGNS = 0; // PTT uses exclusively static shared memory
             genStreamlinesMerge_k<THR_X_SL, THR_X_BL/THR_X_SL, PTT> <<<grid, block, shSizeGNS, streams[n]>>>(
                 max_angle, min_signal, tc_threshold, step_size, relative_peak_thresh, min_separation_angle,
                 rng_seed, rng_offset + n*nseeds_per_gpu, nseeds_gpu, reinterpret_cast<const REAL3 *>(seeds_d[n]),
                 dimx, dimy, dimz, dimt, dataf_d[n], H_d[n], R_d[n], delta_nr, delta_b_d[n], delta_q_d[n],
                 b0s_mask_d[n], metric_map_d[n], samplm_nr, sampling_matrix_d[n],
                 reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]), reinterpret_cast<const int2 *>(sphere_edges_d[n]),
-                nedges, slinesOffs_d[n], shDirTemp0_d[n], shDirTemp1_d[n], slineSeed_d[n], slineLen_d[n], sline_d[n]);
+                nedges, slinesOffs_d[n], shDirTemp0_d[n], slineSeed_d[n], slineLen_d[n], sline_d[n]);
             break;
 
         default:
@@ -2078,7 +2086,6 @@ void generate_streamlines_cuda_mgpu(const ModelType model_type, const REAL max_a
     CHECK_CUDA(cudaFree(slineSeed_d[n]));
     CHECK_CUDA(cudaFree(slinesOffs_d[n]));
     CHECK_CUDA(cudaFree(shDirTemp0_d[n]));
-    CHECK_CUDA(cudaFree(shDirTemp1_d[n]));
     CHECK_CUDA(cudaFree(slineLen_d[n]));
     CHECK_CUDA(cudaFree(sline_d[n]));
   }
