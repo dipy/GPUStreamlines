@@ -40,7 +40,7 @@ from dipy.io.stateful_tractogram import Origin, Space, StatefulTractogram
 from dipy.io.streamline import save_tractogram
 from dipy.tracking import utils
 from dipy.core.gradients import gradient_table, unique_bvals_magnitude
-from dipy.data import small_sphere
+from dipy.data import default_sphere
 from dipy.direction import (BootDirectionGetter, ProbabilisticDirectionGetter, PTTDirectionGetter)
 from dipy.reconst.shm import OpdtModel, CsaOdfModel
 from dipy.reconst.csdeconv import ConstrainedSphericalDeconvModel, auto_response_ssst
@@ -145,6 +145,7 @@ seed_mask = np.asarray(utils.random_seeds_from_mask(
   affine=np.eye(4)))
 
 # Setup model
+sphere = default_sphere
 if args.model == "opdt":
   model_type = cuslines.ModelType.OPDT
   print("Running OPDT model...")
@@ -190,7 +191,7 @@ if args.dg != "boot":
     model_type = cuslines.ModelType.PTT
     dg = PTTDirectionGetter
   fit = model.fit(data, mask=(metric_map >= args.fa_threshold))
-  data = fit.odf(small_sphere).clip(min=0)
+  data = fit.odf(sphere).clip(min=0)
 else:
   dg = BootDirectionGetter
 
@@ -199,16 +200,15 @@ global_chunk_size = args.chunk_size
 # Setup direction getter args
 if args.device == "cpu":
   if args.dg != "boot":
-    dg = dg.from_pmf(data, max_angle=args.max_angle, sphere=small_sphere, relative_peak_threshold=args.relative_peak_threshold, min_separation_angle=args.min_separation_angle)
+    dg = dg.from_pmf(data, max_angle=args.max_angle, sphere=sphere, relative_peak_threshold=args.relative_peak_threshold, min_separation_angle=args.min_separation_angle)
   else:
-    dg = BootDirectionGetter.from_data(data, model, max_angle=args.max_angle, sphere=small_sphere, sh_order=args.sh_order, relative_peak_threshold=args.relative_peak_threshold, min_separation_angle=args.min_separation_angle)
+    dg = BootDirectionGetter.from_data(data, model, max_angle=args.max_angle, sphere=sphere, sh_order=args.sh_order, relative_peak_threshold=args.relative_peak_threshold, min_separation_angle=args.min_separation_angle)
 else:
   # Setup direction getter args
   b0s_mask = gtab.b0s_mask
   dwi_mask = ~b0s_mask
 
   # setup sampling matrix
-  sphere = small_sphere
   theta = sphere.theta
   phi = sphere.phi
   sampling_matrix, _, _ = shm.real_sym_sh_basis(args.sh_order, theta, phi)
