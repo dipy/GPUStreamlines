@@ -10,7 +10,6 @@
 #define SAMPLING_QUALITY 4 // can be 2-7
 #define PROBABILISTIC_BIAS 1 // 1 looks good. can be 0-log_2(N_WARPS) (typically 0-5). 0 is fully probabilistic, 4 is close to deterministic.
 #define ALLOW_WEAK_LINK 1
-#define INIT_FRAME_TRIES 16
 #define TRIES_PER_REJECTION_SAMPLING 1024
 #define DEFAULT_PTT_MINDATASUPPORT 0.05
 #define K_SMALL 0.0001

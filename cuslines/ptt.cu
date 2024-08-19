@@ -90,22 +90,22 @@ __device__ void prepare_propagator_d(REAL_T k1, REAL_T k2, REAL_T arclength,
 template<bool IS_INIT, typename REAL_T>
 __device__ void get_probing_frame_d(const REAL_T* frame, curandStatePhilox4_32_10_t *st, REAL_T* probing_frame) {
     if (IS_INIT) {
-        for (int ii = 0; ii < 3; ii++) {
-            probing_frame[ii] =  frame[ii];
+        for (int ii = 0; ii < 3; ii++) { // tangent
+            probing_frame[ii] = frame[ii];
         }
-        REAL_T __tmp[3];
-        for (int ii = 0; ii < 3; ii++) {
-            do {
-                __tmp[ii] = 2.0 * curand_uniform(st) - 1.0;
-            } while(!__tmp[ii]);
+        if ((probing_frame[0] != 0) && (probing_frame[1] != 0)) { // norm
+            probing_frame[3] = -probing_frame[1];
+            probing_frame[4] = probing_frame[0];
+            probing_frame[5] = 0;
+        } else {
+            probing_frame[3] = 0;
+            probing_frame[4] = -probing_frame[2];
+            probing_frame[5] = 0;
         }
 
         norm3_d(probing_frame, 0); // tangent
-        norm3_d(__tmp, 1); // norm
-        crossnorm3_d(probing_frame + 2*3, probing_frame, __tmp, 2); // binorm
-        for (int ii = 0; ii < 3; ii++) {
-            probing_frame[3 + ii] = __tmp[ii];
-        }
+        norm3_d(probing_frame + 3, 1); // norm
+        crossnorm3_d(probing_frame + 2*3, probing_frame, probing_frame + 3, 2); // binorm
     } else {
         for (int ii = 0; ii < 9; ii++) {
             probing_frame[ii] =  frame[ii];
@@ -236,40 +236,37 @@ __device__ int get_direction_ptt_d(
     REAL_T probing_frame[9];
     REAL_T k1_probe, k2_probe;
     bool support_found = 0;
-    int jj = 0;
-    do {
-        for (int ii = tidx; ii < DISC_VERT_CNT; ii += BDIM_X) {
-            k1_probe = DISC_VERT[ii*2] * max_curvature;
-            k2_probe = DISC_VERT[ii*2+1] * max_curvature;
+    for (int ii = tidx; ii < DISC_VERT_CNT; ii += BDIM_X) {
+        k1_probe = DISC_VERT[ii*2] * max_curvature;
+        k2_probe = DISC_VERT[ii*2+1] * max_curvature;
 
-            get_probing_frame_d<IS_INIT>(__frame_sh, st, probing_frame);
+        get_probing_frame_d<IS_INIT>(__frame_sh, st, probing_frame);
 
-            const REAL_T this_support = calculate_data_support_d(
-                *__first_val_sh,
-                pos, pmf, dimx, dimy, dimz, dimt,
-                probe_step_size,
-                odf_sphere_vertices,
-                k1_probe, k2_probe,
-                probing_frame);
+        const REAL_T this_support = calculate_data_support_d(
+            *__first_val_sh,
+            pos, pmf, dimx, dimy, dimz, dimt,
+            probe_step_size,
+            odf_sphere_vertices,
+            k1_probe, k2_probe,
+            probing_frame);
 
 #if 0
-            if (threadIdx.y == 1 && ii == 0) { 
-                printf("    k1_probe: %f, k2_probe %f, support %f for id: %i\n", k1_probe, k2_probe, this_support, tidx);
-            }
+        if (threadIdx.y == 1 && ii == 0) { 
+            printf("    k1_probe: %f, k2_probe %f, support %f for id: %i\n", k1_probe, k2_probe, this_support, tidx);
+        }
 #endif
 
-            if (this_support < NORM_MIN_SUPPORT) {
-                __vert_pdf_sh[ii] = 0;
-            } else {
-                __vert_pdf_sh[ii] = this_support;
-                support_found = 1;
-            }
+        if (this_support < NORM_MIN_SUPPORT) {
+            __vert_pdf_sh[ii] = 0;
+        } else {
+            __vert_pdf_sh[ii] = this_support;
+            support_found = 1;
         }
-        if (IS_INIT) {
-            const int __msk = __ballot_sync(WMASK, support_found);
-            support_found = (__msk != 0);
-        }
-    } while (IS_INIT && (!support_found) && (jj++ < INIT_FRAME_TRIES));
+    }
+    const int __msk = __ballot_sync(WMASK, support_found);
+    if (__msk == 0) {
+        return 0;
+    }
 
 #if 0
     __syncwarp(WMASK);
