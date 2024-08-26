@@ -86,7 +86,4 @@ set_target_properties(cuslines PROPERTIES CUDA_ARCHITECTURES "${CUDA_COMPUTE_CAP
 # install
 install(TARGETS cuslines cuslines_kernels-shared LIBRARY DESTINATION "${CMAKE_INSTALL_PREFIX}/cuslines")
 install(FILES "${CMAKE_SOURCE_DIR}/cuslines/__init__.py" DESTINATION "${CMAKE_INSTALL_PREFIX}/cuslines")
-install(FILES "${CMAKE_SOURCE_DIR}/run_dipy_gpu.py" DESTINATION "${CMAKE_INSTALL_PREFIX}/")
-install(FILES "${CMAKE_SOURCE_DIR}/run_dipy_cpu.py" DESTINATION "${CMAKE_INSTALL_PREFIX}/")
-install(FILES "${CMAKE_SOURCE_DIR}/run_dipy_gpu_hardi.py" DESTINATION "${CMAKE_INSTALL_PREFIX}/")
-install(FILES "${CMAKE_SOURCE_DIR}/run_dipy_cpu_hardi.py" DESTINATION "${CMAKE_INSTALL_PREFIX}/")
+install(FILES "${CMAKE_SOURCE_DIR}/run_gpu_streamlines.py" DESTINATION "${CMAKE_INSTALL_PREFIX}/")
