@@ -3,10 +3,12 @@
 ## Installation
 When cloning the repo, please use "git clone --recursive" to pull all the requirements.
 
-To install, simply run `./build_cuslines.sh`. This will place the cuslines library and files within a new subdirectory `./install` as well as copy the example script.
+To install, simply run `pip install .` in the top-level repository directory.
 
 ## Running the examples
-First, navigate into the `./builds` subdirectory. There are two example scripts using the HARDI dataset, `run_dipy_cpu_hardi.py` and `run_dipy_gpu_hardi.py`, which run on CPU and GPU respectively.
+This repository contains several example usage scripts.
+
+There are two example scripts using the HARDI dataset, `run_dipy_cpu_hardi.py` and `run_dipy_gpu_hardi.py`, which run on CPU and GPU respectively.
 
 To run the baseline CPU example on a random set of 1000 seeds, this is the command and example output:
 ```
