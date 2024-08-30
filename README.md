@@ -8,11 +8,11 @@ To install, simply run `pip install .` in the top-level repository directory.
 ## Running the examples
 This repository contains several example usage scripts.
 
-There are two example scripts using the HARDI dataset, `run_dipy_cpu_hardi.py` and `run_dipy_gpu_hardi.py`, which run on CPU and GPU respectively.
+The script `run_gpu_streamlines.py` demonstrates how to run any diffusion MRI dataset on the GPU. It can also run on the CPU for reference, if the argument `--device=cpu` is used. If not data is passed, it will donaload and use the HARDI dataset.
 
 To run the baseline CPU example on a random set of 1000 seeds, this is the command and example output:
 ```
-$ python run_dipy_cpu_hardi.py --chunk-size 100000 --output-prefix small --nseeds 1000
+$ python run_gpu_streamlines.py --device=cpu --output-prefix small --nseeds 1000
 parsing arguments
 Fitting Tensor
 Computing anisotropy measures (FA,MD,RGB)
@@ -30,7 +30,7 @@ Streamline generation total time: 6.9404990673065186 sec
 
 To run the same case on a single GPU, this is the command and example output:
 ```
-$ python run_dipy_gpu_hardi.py --chunk-size 100000 --output-prefix small --nseeds 1000 --ngpus 1
+$ python run_gpu_streamlines.py --output-prefix small --nseeds 1000 --ngpus 1
 parsing arguments
 Fitting Tensor
 Computing anisotropy measures (FA,MD,RGB)
@@ -48,11 +48,13 @@ Streamline generation total time: 0.3834989070892334 sec
 Destroy GPUTracker...
 ```
 
+Note that if you experience memory errors, you can adjust the `--chunk-size` flag.
+
 To run on more seeds, we suggest enabling the `--use-fast-write` flag in the GPU script to not get bottlenecked by writing files. Here is a comparison running on 500K seeds on 1 GPU with and without this flag:
 
 Without `--use-fast-write`:
 ```
-$ python run_dipy_gpu_hardi.py --chunk-size 100000 --output-prefix small --nseeds 500000 --ngpus 1
+$ python run_gpu_streamlines.py --output-prefix small --nseeds 500000 --ngpus 1
 parsing arguments
 Fitting Tensor
 Computing anisotropy measures (FA,MD,RGB)
@@ -80,7 +82,7 @@ Destroy GPUTracker...
 
 With `--use-fast-write`:
 ```
-$ python run_dipy_gpu_hardi.py --chunk-size 100000 --output-prefix small --nseeds 500000 --ngpus 1 --use-fast-write
+$ python run_gpu_streamlines.py --output-prefix small --nseeds 500000 --ngpus 1 --use-fast-write
 parsing arguments
 Fitting Tensor
 Computing anisotropy measures (FA,MD,RGB)
@@ -120,11 +122,10 @@ $ docker pull docker.pkg.github.com/dipy/gpustreamlines/gpustreamlines:latest
 4. Run the code, mounting the current directory into the container for easy result retrieval:
 ```
 $ docker run --gpus=all -v ${PWD}:/opt/exec/output:rw -it docker.pkg.github.com/dipy/gpustreamlines/gpustreamlines:latest \
- python run_dipy_gpu_hardi.py --chunk-size 100000 --ngpus 1 --output-prefix output/hardi_gpu_full --use-fast-write
+ python run_gpu_streamlines.py --ngpus 1 --output-prefix output/hardi_gpu_full --use-fast-write
 ```
 5. The code produces a number of independent track files (one per processed "chunk"), but we have provided a merge script to combine them into a single trk file. To merge files, run:
 ```
 $ docker run --gpus=all -v ${PWD}:/opt/exec/output:rw -it docker.pkg.github.com/dipy/gpustreamlines/gpustreamlines:latest \
  ./merge_trk.sh -o output/hardi_tracks.trk output/hardi_gpu_full*
 ```
-
