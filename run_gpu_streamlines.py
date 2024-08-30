@@ -121,9 +121,9 @@ else:
   gtab = get_gtab(args.bvals, args.bvecs)
   roi = get_img(args.roi_nifti)
   mask = get_img(args.mask_nifti)
-  data = img.get_data()
-  roi_data = roi.get_data()
-  mask = mask.get_data()
+  data = img.get_fdata()
+  roi_data = roi.get_fdata()
+  mask = mask.get_fdata()
 
 tenmodel = dti.TensorModel(gtab, fit_method='WLS')
 print('Fitting Tensor')
