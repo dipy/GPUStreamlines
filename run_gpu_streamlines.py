@@ -30,6 +30,7 @@
 import argparse
 import random
 import time
+import zipfile
 
 import numpy as np
 import numpy.linalg as npl
@@ -52,6 +53,8 @@ from dipy.data import read_stanford_pve_maps
 
 import nibabel as nib
 from nibabel.orientations import aff2axcodes
+
+from trx.trx_file_memmap import TrxFile, zip_from_folder
 
 # Import custom module
 import cuslines
@@ -84,7 +87,7 @@ parser.add_argument("--output-prefix", type=str, default ='', help="path to the 
 parser.add_argument("--chunk-size", type=int, default=100000, help="how many seeds to process per sweep, per GPU")
 parser.add_argument("--nseeds", type=int, default=100000, help="how many seeds to process in total")
 parser.add_argument("--ngpus", type=int, default=1, help="number of GPUs to use if using gpu")
-parser.add_argument("--use-fast-write", action='store_true', help="use fast file write (only if using gpu)")
+parser.add_argument("--write-method", type=str, default="fast", help="Can be trx, fast, or standard")
 parser.add_argument("--max-angle", type=float, default=60, help="max angle (in degrees)")
 parser.add_argument("--min-signal", type=float, default=1.0, help="default: 1.0")
 parser.add_argument("--step-size", type=float, default=0.5, help="default: 0.5")
@@ -98,6 +101,12 @@ parser.add_argument("--dg", type=str, default="boot", choices=['boot', 'prob', '
 
 args = parser.parse_args()
 
+if args.device == "cpu" and args.write_method != "standard":
+  print("WARNING: only standard write method is implemented for cpu testing.")
+  write_method = "standard"
+else:
+  write_method = args.write_method
+
 if 'hardi' in [args.nifti_file, args.bvals, args.bvecs, args.mask_nifti, args.roi_nifti]:
   if not all(arg == 'hardi' for arg in [args.nifti_file, args.bvals, args.bvecs, args.mask_nifti, args.roi_nifti]):
     raise ValueError("If any of the arguments is 'hardi', all must be 'hardi'")
@@ -108,7 +117,6 @@ if 'hardi' in [args.nifti_file, args.bvals, args.bvecs, args.mask_nifti, args.ro
 
   img = get_img(hardi_nifti_fname)
   voxel_order = "".join(aff2axcodes(img.affine))
-  img_affine = img.affine
 
   gtab = get_gtab(hardi_bval_fname, hardi_bvec_fname)
 
@@ -243,6 +251,21 @@ nchunks = (seed_mask.shape[0] + global_chunk_size - 1) // global_chunk_size
 t1 = time.time()
 streamline_time = 0
 io_time = 0
+
+if args.output_prefix and write_method == "trx":
+  # Will resize by a factor of 2 if these are exceeded
+  sl_len_guess = 100
+  sl_per_seed_guess = 3
+  n_sls_guess = sl_per_seed_guess*len(seed_mask)
+
+  # trx files use memory mapping
+  trx_file = TrxFile(
+    reference=hardi_nifti_fname,
+    nb_streamlines=n_sls_guess,
+    nb_vertices=n_sls_guess*sl_len_guess)
+  offsets_idx = 0
+  sls_data_idx = 0
+
 for idx in range(int(nchunks)):
   # Main streamline computation
   ts = time.time()
@@ -260,16 +283,55 @@ for idx in range(int(nchunks)):
   # Save tracklines file
   if args.output_prefix:
     ts = time.time()
-    if (args.device == "gpu") and args.use_fast_write:
-      fname = "{}.{}_{}".format(args.output_prefix, idx+1, nchunks)
-      gpu_tracker.dump_streamlines(fname, voxel_order, wm.shape, wm.header.get_zooms(), img.affine)
-    else:
+    if write_method == "standard":
       fname = "{}.{}_{}.trk".format(args.output_prefix, idx+1, nchunks)
       sft = StatefulTractogram(streamlines, args.nifti_file, Space.VOX)
       save_tractogram(sft, fname)
-    te = time.time()
-    print("Saved streamlines to {}, time {} s".format(fname, te-ts))
+      te = time.time()
+      print("Saved streamlines to {}, time {} s".format(fname, te-ts))
+    elif write_method == "trx":
+      tractogram = nib.streamlines.Tractogram(streamlines, affine_to_rasmm=img.affine)
+      tractogram.to_world()
+      sls = tractogram.streamlines
+
+      new_offsets_idx = offsets_idx + len(sls._offsets)
+      new_sls_data_idx = sls_data_idx + len(sls._data)
+
+      if new_offsets_idx > trx_file.header["NB_STREAMLINES"]\
+          or new_sls_data_idx > trx_file.header["NB_VERTICES"]:
+        print("TRX resizing...")
+        trx_file.resize(nb_streamlines=new_offsets_idx*2, nb_vertices=new_sls_data_idx*2)
+
+      # TRX uses memmaps here
+      trx_file.streamlines._data[sls_data_idx:new_sls_data_idx] = sls._data
+      trx_file.streamlines._offsets[offsets_idx:new_offsets_idx] = offsets_idx + sls._offsets
+      trx_file.streamlines._lengths[offsets_idx:new_offsets_idx] = sls._lengths
+
+      offsets_idx = new_offsets_idx
+      sls_data_idx = new_sls_data_idx
+      
+      te = time.time()
+      print("Streamlines to TRX format, time {} s".format(te-ts))
+    else:
+      fname = "{}.{}_{}".format(args.output_prefix, idx+1, nchunks)
+      gpu_tracker.dump_streamlines(fname, voxel_order, wm.shape, wm.header.get_zooms(), img.affine)
+      te = time.time()
+      print("Saved streamlines to {}, time {} s".format(fname, te-ts))
+
     io_time += (te-ts)
+
+if args.output_prefix and write_method == "trx":
+  ts = time.time()
+  fname = "{}.trx".format(args.output_prefix)
+  trx_file.resize()
+  zip_from_folder(
+    trx_file._uncompressed_folder_handle.name,
+    fname,
+    zipfile.ZIP_STORED)
+  trx_file.close()
+  te = time.time()
+  print("Saved streamlines to {}, time {} s".format(fname, te-ts))
+  io_time += (te-ts)
 
 t2 = time.time()
 
