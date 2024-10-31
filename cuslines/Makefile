@@ -27,28 +27,29 @@
 
 
 CUDA_HOME=/usr/local/cuda
-CUDACC=$(CUDA_HOME)/bin/nvcc
+CUDACC=$(CUDA_HOME)/bin/nvcc # -G -g -dopt=on
 CXX=g++
 LD=g++
 
 CXXFLAGS= -c -O3 -std=c++11 -fopenmp -fPIC `python3 -m pybind11 --includes` -I$(CUDA_HOME)/include
 
-SMS ?= 60 70
+SMS ?= 70
 CUDA_ARCH = $(foreach SM,$(SMS),-gencode arch=compute_$(SM),code=sm_$(SM))
 LASTSM := $(lastword $(sort $(SMS)))
 CUDA_ARCH += -gencode arch=compute_$(LASTSM),code=compute_$(LASTSM)
 CUDACFLAGS=-c -O3 -lineinfo -Xptxas=-v -std=c++11 -Xcompiler -fPIC -Xcompiler=-fopenmp $(CUDA_ARCH)
+LDFLAGS= -shared -fopenmp -L$(CUDA_HOME)/lib64 -lcudart -lnvToolsExt
 
 all: cuslines
 
 cuslines: generate_streamlines_cuda.o cuslines.o
-	$(LD) -shared cuslines.o generate_streamlines_cuda.o -o cuslines`python3-config --extension-suffix` -fopenmp -L$(CUDA_HOME)/lib64 -lcudart
+	$(LD) cuslines.o generate_streamlines_cuda.o -o cuslines`python3-config --extension-suffix` $(LDFLAGS)
 
-%.o: %.cu
-	$(CUDACC) $(CUDACFLAGS) $<
+%.o : %.cu
+	$(CUDACC) $(CUDACFLAGS) $< -o $@
 
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) $< -o $@
 
 clean:
-	rm *.o cuslines`python3-config --extension-suffix`
+	rm *.o cuslines`python3-config --extension-suffix` __pycache__/*.pyc

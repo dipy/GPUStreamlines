@@ -33,15 +33,15 @@
 
 #include "globals.h"
 
-void generate_streamlines_cuda_mgpu(const int model_type, const REAL max_angle, const REAL min_signal, const REAL tc_threshold, const REAL step_size,
+void generate_streamlines_cuda_mgpu(const ModelType model_type, const REAL max_angle, const REAL min_signal, const REAL tc_threshold, const REAL step_size,
                                     const REAL relative_peak_thresh, const REAL min_separation_angle,
-				    const int nseeds, const std::vector<REAL*> &seeds_d,
+                                    const int nseeds, const std::vector<REAL*> &seeds_d,
                                     const int dimx, const int dimy, const int dimz, const int dimt,
                                     const std::vector<REAL*> &dataf_d, const std::vector<REAL*> &H_d, const std::vector<REAL*> &R_d,
-			            const int delta_nr,
+                                    const int delta_nr,
                                     const std::vector<REAL*> &delta_b_d, const std::vector<REAL*> &delta_q_d,
                                     const std::vector<int*> &b0s_mask_d, const std::vector<REAL*> &metric_map_d,
-			            const int samplm_nr,
+                                    const int samplm_nr,
                                     const std::vector<REAL*> &sampling_matrix_d,
                                     const std::vector<REAL*> &sphere_vertices_d, const std::vector<int*> &sphere_edges_d, const int nedges,
                                     std::vector<REAL*> &slines_h, std::vector<int*> &slinesLen_h, std::vector<int> &nSlines_h,
