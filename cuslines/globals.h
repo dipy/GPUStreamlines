@@ -43,6 +43,7 @@
 #define REAL_MAX	(FLT_MAX)
 #define REAL_MIN	(-REAL_MAX)
 #define COS		__cosf
+#define SIN		__sinf
 #define FABS		fabsf
 #define SQRT		sqrtf
 #define RSQRT		rsqrtf
@@ -60,6 +61,7 @@
 #define REAL_MAX	(DBL_MAX)
 #define REAL_MIN	(-REAL_MAX)
 #define COS		cos
+#define SIN		sin
 #define FABS		fabs
 #define SQRT		sqrt
 #define RSQRT		rsqrt
@@ -70,16 +72,28 @@
 #define MAX_SLINE_LEN	(501)
 #define PMF_THRESHOLD_P	((REAL)0.1)
 
-//#define TC_THRESHOLD_P	((REAL)0.1)
-//#define STEP_SIZE_P	((REAL)0.5)  // only for TRK generation
-//#define MAX_ANGLE_P	((REAL)1.0471975511965976) // 60 deg in radians
-//#define MIN_SIGNAL_P	((REAL)1.0)
+#define THR_X_BL (64)
+#define THR_X_SL (32)
 
 #define MAX_SLINES_PER_SEED (10)
 
 #define MIN(x,y) (((x)<(y))?(x):(y))
 #define MAX(x,y) (((x)>(y))?(x):(y))
+#define POW2(n) (1 << (n))
 
 #define DIV_UP(a,b) (((a)+((b)-1))/(b))
+
+#define EXCESS_ALLOC_FACT 2
+
+#if 0
+  #define DEBUG
+#endif
+
+enum ModelType {
+  OPDT = 0,
+  CSA = 1,
+  PROB = 2,
+  PTT = 3,
+};
 
 #endif

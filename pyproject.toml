@@ -1,0 +1,14 @@
+[build-system]
+requires = ["scikit-build-core", "pybind11"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "cuslines"
+version = "1.0.0"
+description="GPU-accelerated tractography package"
+readme = "README.md"
+requires-python = ">=3.7"
+
+[tool.scikit-build]
+cmake.build-type = "Release"
+cmake.args = ["-DCMAKE_CUDA_ARCHITECTURES=52-real;60-real;61-real;70-real;72-real;75-real;80-real;86-real;87-real;90"] 

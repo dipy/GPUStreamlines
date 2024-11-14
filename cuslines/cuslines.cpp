@@ -37,17 +37,17 @@ namespace py = pybind11;
 
 #include <cuda_runtime.h>
 
+// #define USE_NVTX
+
 #include "globals.h"
 #include "cudamacro.h"
 #include "generate_streamlines_cuda.h"
 
 using np_array = py::array_t<REAL>;
-using np_array_bool = py::array_t<bool>;
 using np_array_int = py::array_t<int>;
-using np_array_short = py::array_t<short>;
 
 using np_array_cast = py::array_t<REAL, py::array::c_style | py::array::forcecast>;
-using np_array_short_cast = py::array_t<short, py::array::c_style | py::array::forcecast>;
+using np_array_int_cast = py::array_t<int, py::array::c_style | py::array::forcecast>;
 
 // Handle to cleanup returned host allocations when associated Python object is destroyed
 template <typename T>
@@ -60,20 +60,23 @@ py::capsule cleanup(T* ptr) {
 
 class GPUTracker {
   public:
-    GPUTracker(double max_angle,
+    GPUTracker(ModelType model_type,
+               double max_angle,
                double min_signal,
                double tc_threshold,
                double step_size,
+               double relative_peak_thresh,
+               double min_separation_angle,
                np_array_cast dataf,
-               np_array H,
-               np_array R,
-               np_array delta_b,
-               np_array delta_q,
-               np_array_int b0s_mask,
-               np_array metric_map,
-               np_array sampling_matrix,
-               np_array sphere_vertices,
-               np_array_int sphere_edges,
+               np_array_cast H,
+               np_array_cast R,
+               np_array_cast delta_b,
+               np_array_cast delta_q,
+               np_array_int_cast b0s_mask,
+               np_array_cast metric_map,
+               np_array_cast sampling_matrix,
+               np_array_cast sphere_vertices,
+               np_array_int_cast sphere_edges,
                int ngpus = 1,
                int rng_seed = 0,
                int rng_offset = 0) {
@@ -121,10 +124,13 @@ class GPUTracker {
       std::cerr << "Creating GPUTracker with " << ngpus << " GPUs..." << std::endl;
       ngpus_ = ngpus;
 
+      model_type_ = model_type;
       max_angle_ = max_angle;
       min_signal_ = min_signal;
       tc_threshold_ = tc_threshold;
       step_size_ = step_size;
+      relative_peak_thresh_ = relative_peak_thresh,
+      min_separation_angle_ = min_separation_angle,
 
       // Allocate/copy constant problem data on GPUs
       dataf_d.resize(ngpus_, nullptr);
@@ -220,7 +226,8 @@ class GPUTracker {
       std::vector<int> nSlines(ngpus_);
 
       // Call GPU routine
-      generate_streamlines_cuda_mgpu(max_angle_, min_signal_, tc_threshold_, step_size_,
+      generate_streamlines_cuda_mgpu(model_type_, max_angle_, min_signal_, tc_threshold_, step_size_,
+                                     relative_peak_thresh_, min_separation_angle_,
                                      nseeds, seeds_d,
                                      dimx_, dimy_, dimz_, dimt_,
                                      dataf_d, H_d, R_d, delta_nr_, delta_b_d, delta_q_d, b0s_mask_d, metric_map_d, samplm_nr_, sampling_matrix_d,
@@ -263,6 +270,9 @@ class GPUTracker {
       auto roi_shape_info = roi_shape.request();
       auto voxel_size_info = voxel_size.request();
       auto vox_to_ras_info = vox_to_ras.request();
+
+      START_RANGE("filewrite", 0);
+
       //#pragma omp parallel for
       for (int n = 0; n < ngpus_; ++n) {
         std::stringstream ss;
@@ -271,6 +281,8 @@ class GPUTracker {
                   voxel_order.c_str(), reinterpret_cast<REAL *>(vox_to_ras_info.ptr), nSlines_old_[n], slinesLen_[n],
                   reinterpret_cast<REAL3 *>(slines_[n]));
       }
+
+      END_RANGE;
     }
 
   private:
@@ -281,10 +293,13 @@ class GPUTracker {
     int nedges_;
     int delta_nr_, samplm_nr_;
 
+    ModelType model_type_;
     double max_angle_;
     double tc_threshold_;
     double min_signal_;
     double step_size_;
+    double relative_peak_thresh_;
+    double min_separation_angle_;
 
     std::vector<int> nSlines_old_;
     std::vector<REAL*> slines_;
@@ -307,15 +322,26 @@ class GPUTracker {
 
 
 PYBIND11_MODULE(cuslines, m) {
+  m.attr("MAX_SLINE_LEN") = py::int_(MAX_SLINE_LEN);
+  m.attr("REAL_SIZE") = py::int_(REAL_SIZE);
+
+  py::enum_<ModelType>(m, "ModelType")
+    .value("OPDT", OPDT)
+    .value("CSA", CSA)
+    .value("PROB", PROB)
+    .value("PTT", PTT);
+
   py::class_<GPUTracker>(m, "GPUTracker")
-    .def(py::init<double, double, double, double,
-		  np_array_cast, np_array,
-                  np_array, np_array,
-                  np_array, np_array_int,
-                  np_array, np_array,
-                  np_array, np_array_int,
+    .def(py::init<ModelType, double, double, double, double,
+                  double, double,
+		              np_array_cast, np_array_cast,
+                  np_array_cast, np_array_cast,
+                  np_array_cast, np_array_int_cast,
+                  np_array_cast, np_array_cast,
+                  np_array_cast, np_array_int_cast,
                   int, int, int>(),
-                  py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(),
+                  py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(),
+                  py::arg().noconvert(), py::arg().noconvert(),
                   py::arg().noconvert(), py::arg().noconvert(),
                   py::arg().noconvert(), py::arg().noconvert(),
                   py::arg().noconvert(), py::arg().noconvert(),
