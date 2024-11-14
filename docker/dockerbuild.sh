@@ -10,4 +10,3 @@ NO_TAG="$(echo "${NO_TAG}" | tr -d '[:space:]')"
 
 echo $TAG
 docker build --no-cache -t $TAG -t $TAG2 --build-arg COMMIT ./docker
-docker push --all-tags $NO_TAG
