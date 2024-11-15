@@ -24,8 +24,11 @@ find_package(CUDAToolkit REQUIRED)
 
 # Set default CUDA compute capabilities if unset
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-  set(CMAKE_CUDA_ARCHITECTURES 70 80 90)
+  include(FindCUDA/select_compute_arch.cmake)
+  cuda_select_nvcc_arch_flags(CUDA_ARCH_FLAGS Auto)
+  set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_FLAGS})
 endif()
+message(STATUS "Using CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 
 # OpenMP
 find_package(OpenMP)
