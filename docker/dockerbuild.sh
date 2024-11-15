@@ -8,5 +8,10 @@ TAG="$(echo "${TAG}" | tr -d '[:space:]')"
 TAG2="$(echo "${TAG2}" | tr -d '[:space:]')"
 NO_TAG="$(echo "${NO_TAG}" | tr -d '[:space:]')"
 
+git clone https://github.com/dipy/GPUStreamlines.git
+cd GPUStreamlines
+git checkout $COMMIT
+cd ..
+
 echo $TAG
 docker build --no-cache -t $TAG -t $TAG2 --build-arg COMMIT ./docker
