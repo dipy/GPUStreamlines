@@ -16,7 +16,7 @@ jobs:
       uses: docker/setup-buildx-action@v1
 
     - name: Build docker image
-      run: sh ./Docker/dockerbuild.sh \
+      run: sh ./docker/dockerbuild.sh \
         "${{github.sha}}" \
         "dipy"
 
