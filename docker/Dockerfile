@@ -18,9 +18,8 @@ ENV LD_LIBRARY_PATH /opt/anaconda/lib:${LD_LIBRARY_PATH}
 # python prereqs
 RUN pip install numpy scipy cython nibabel dipy tqdm
 
-# copy stuff
-COPY .. .
-RUN pip install .
+COPY GPUStreamlines /opt/GPUStreamlines
+RUN cd /opt/GPUStreamlines && pip install .
 
 # compile
 RUN cd /opt/GPUStreamlines && mkdir build && cd build \
