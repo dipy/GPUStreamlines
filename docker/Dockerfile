@@ -20,7 +20,7 @@ RUN pip install numpy scipy cython nibabel dipy tqdm
 
 # copy stuff
 COPY . /opt/GPUStreamlines
-RUN /opt/GPUStreamlines && pip install .
+RUN cd /opt/GPUStreamlines && pip install .
 
 # compile
 RUN cd /opt/GPUStreamlines && mkdir build && cd build \
