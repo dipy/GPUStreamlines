@@ -213,7 +213,7 @@ __device__ int get_direction_ptt_d(
     REAL_T *__first_val_sh = first_val_sh + tidy;
 
     const REAL_T max_curvature = SIN(max_angle / 2) / step_size; // bigger numbers means wiggle more
-    const REAL_T probe_step_size = ((step_size / 2) / (PROBE_QUALITY - 1));
+    const REAL_T probe_step_size = ((step_size / PROBE_FRAC) / (PROBE_QUALITY - 1));
 
     REAL_T __tmp;
 
