@@ -5,6 +5,8 @@ When cloning the repo, please use "git clone --recursive" to pull all the requir
 
 To install, simply run `pip install .` in the top-level repository directory.
 
+By default, the build supports compute capability 7.0 and 8.0. If a different compute capability is needed, the `./build_cuslines.sh` script should define `CUDA_COMPUTE_CAPABILITY` (e.g. `-DCUDA_COMPUTE_CAPABILITY=61` for compute capability 6.1) in the call to cmake.
+
 ## Running the examples
 This repository contains several example usage scripts.
 
