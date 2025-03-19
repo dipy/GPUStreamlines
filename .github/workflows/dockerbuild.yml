@@ -10,16 +10,8 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-latest
     steps:
-    - name: Maximize build space
-      uses: easimon/maximize-build-space@master
-      with:
-        root-reserve-mb: 32768
-        remove-dotnet: 'true'
-        remove-android: 'true'
-        remove-haskell: 'true'
-
     - name: Checkout repo
       uses: actions/checkout@v2
 
@@ -37,6 +29,7 @@ jobs:
         password: ${{secrets.CR_PAT}}
 
     - name: Build and push docker image
-      run: sh ./Docker/dockerbuild.sh \
+      run: sh ./docker/dockerbuild.sh \
         "${{github.sha}}" \
         "dipy"
+
