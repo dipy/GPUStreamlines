@@ -34,6 +34,7 @@ RUN pip install scipy>=1.13.0 cython nibabel dipy tqdm
 RUN git clone --recurse-submodules \
 	https://github.com/dipy/GPUStreamlines.git \
 	/opt/GPUStreamlines
+RUN cd /opt/GPUStreamlines && git reset --hard ${COMMIT}
 
 # compile
 RUN cd /opt/GPUStreamlines && mkdir build && cd build \
