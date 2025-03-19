@@ -8,6 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install --assume-yes apt-transport-https \
 	ca-certificates gnupg software-properties-common \
 	gcc git wget curl numactl cmake
+RUN apt install -y cmake libncurses5-dev libtinfo6
 
 RUN curl -L "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh" \
     -o "/tmp/Miniconda3.sh"
@@ -19,10 +20,19 @@ ENV LD_LIBRARY_PATH /opt/anaconda/lib:${LD_LIBRARY_PATH}
 
 # python prereqs
 RUN conda install -c conda-forge git
-RUN pip install numpy scipy cython nibabel dipy tqdm
+RUN pip install numpy>=2.0.0
+RUN pip install scipy>=1.13.0 cython nibabel dipy tqdm
 
-RUN git clone --recurse-submodules https://github.com/dipy/GPUStreamlines.git
-RUN cd GPUStreamlines && pip install .
+# copy stuff
+COPY CMakeLists.txt /opt/GPUStreamlines/CMakeLists.txt
+COPY run_dipy_gpu.py /opt/GPUStreamlines/run_dipy_gpu.py
+COPY run_dipy_cpu.py /opt/GPUStreamlines/run_dipy_cpu.py
+COPY run_dipy_gpu_hardi.py /opt/GPUStreamlines/run_dipy_gpu_hardi.py
+COPY run_dipy_cpu_hardi.py /opt/GPUStreamlines/run_dipy_cpu_hardi.py
+COPY merge_trk.sh /opt/exec/merge_trk.sh
+COPY cuslines /opt/GPUStreamlines/cuslines
+COPY external /opt/GPUStreamlines/external
+RUN mkdir -p /opt/exec/output
 
 # compile
 RUN cd /opt/GPUStreamlines && mkdir build && cd build \
