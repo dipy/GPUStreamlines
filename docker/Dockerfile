@@ -7,8 +7,16 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install --assume-yes apt-transport-https \
 	ca-certificates gnupg software-properties-common \
-	gcc git wget curl numactl cmake
+	gcc git wget curl numactl
 RUN apt install -y cmake libncurses5-dev libtinfo6
+
+RUN wget https://github.com/Kitware/CMake/releases/download/v3.24.0/cmake-3.24.0-linux-x86_64.sh \
+    -O /tmp/cmake-install.sh \
+    && chmod +x /tmp/cmake-install.sh \
+    && mkdir /opt/cmake \
+    && /tmp/cmake-install.sh --skip-license --prefix=/opt/cmake \
+    && rm /tmp/cmake-install.sh
+ENV PATH /opt/cmake/bin:${PATH}
 
 RUN curl -L "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh" \
     -o "/tmp/Miniconda3.sh"
