@@ -23,16 +23,9 @@ RUN conda install -c conda-forge git
 RUN pip install numpy>=2.0.0
 RUN pip install scipy>=1.13.0 cython nibabel dipy tqdm
 
-# copy stuff
-COPY CMakeLists.txt /opt/GPUStreamlines/CMakeLists.txt
-COPY run_dipy_gpu.py /opt/GPUStreamlines/run_dipy_gpu.py
-COPY run_dipy_cpu.py /opt/GPUStreamlines/run_dipy_cpu.py
-COPY run_dipy_gpu_hardi.py /opt/GPUStreamlines/run_dipy_gpu_hardi.py
-COPY run_dipy_cpu_hardi.py /opt/GPUStreamlines/run_dipy_cpu_hardi.py
-COPY merge_trk.sh /opt/exec/merge_trk.sh
-COPY cuslines /opt/GPUStreamlines/cuslines
-COPY external /opt/GPUStreamlines/external
-RUN mkdir -p /opt/exec/output
+RUN git clone --recurse-submodules \
+	https://github.com/dipy/GPUStreamlines.git \
+	/opt/GPUStreamlines
 
 # compile
 RUN cd /opt/GPUStreamlines && mkdir build && cd build \
