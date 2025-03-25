@@ -30,11 +30,9 @@ ENV LD_LIBRARY_PATH /opt/anaconda/lib:${LD_LIBRARY_PATH}
 RUN conda install -c conda-forge git
 RUN pip install numpy>=2.0.0
 RUN pip install scipy>=1.13.0 cython nibabel dipy tqdm
+RUN pip install pybind11
 
-RUN git clone --recurse-submodules \
-	https://github.com/dipy/GPUStreamlines.git \
-	/opt/GPUStreamlines
-RUN cd /opt/GPUStreamlines && git reset --hard ${COMMIT}
+COPY . /opt/GPUStreamlines/
 
 # compile
 RUN cd /opt/GPUStreamlines && mkdir build && cd build \

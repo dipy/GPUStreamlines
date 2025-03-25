@@ -47,8 +47,14 @@ if(OPENMP_FOUND)
     message(STATUS "OpenMP runtime used: ${OMP_RUNTIME}")
 endif()
 
+# Find pybind11
+execute_process(COMMAND python -c "import pybind11; print(pybind11.get_cmake_dir())"
+                OUTPUT_VARIABLE pybind11_DIR
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
+list(APPEND CMAKE_PREFIX_PATH ${pybind11_DIR})
+find_package(pybind11 REQUIRED)
+
 # Build library and pybind11 module
-add_subdirectory(external/pybind11)
 add_library(cuslines_kernels)
 target_sources(cuslines_kernels
 	       PRIVATE
