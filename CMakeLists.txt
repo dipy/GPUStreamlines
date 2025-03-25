@@ -47,8 +47,10 @@ if(OPENMP_FOUND)
     message(STATUS "OpenMP runtime used: ${OMP_RUNTIME}")
 endif()
 
+# Find pybind11
+find_package(pybind11 REQUIRED)
+
 # Build library and pybind11 module
-add_subdirectory(external/pybind11)
 add_library(cuslines_kernels)
 target_sources(cuslines_kernels
 	       PRIVATE
