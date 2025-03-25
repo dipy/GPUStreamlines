@@ -5,8 +5,8 @@ on:
     branches:
       - 'master'
   pull_request:
-    branches:
-      - 'master'
+    # branches:
+    #   - 'master'
 
 jobs:
   build:
@@ -27,8 +27,11 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Build and push docker image
-      run: sh ./docker/dockerbuild.sh \
-        "${{github.sha}}" \
-        "dipy"
-
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: |
+          ghcr.io/dipy/gpustreamlines:${{ github.sha }}
+          ghcr.io/dipy/gpustreamlines:latest
