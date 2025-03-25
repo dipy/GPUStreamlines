@@ -1,8 +1,6 @@
 # GPUStreamlines
 
 ## Installation
-When cloning the repo, please use "git clone --recursive" to pull all the requirements.
-
 To install, simply run `pip install .` in the top-level repository directory.
 
 ## Running the examples
