@@ -48,6 +48,10 @@ if(OPENMP_FOUND)
 endif()
 
 # Find pybind11
+execute_process(COMMAND python -c "import pybind11; print(pybind11.get_cmake_dir())"
+                OUTPUT_VARIABLE pybind11_DIR
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
+list(APPEND CMAKE_PREFIX_PATH ${pybind11_DIR})
 find_package(pybind11 REQUIRED)
 
 # Build library and pybind11 module
