@@ -28,10 +28,12 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build and push Docker image
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v6
       with:
         context: .
         push: true
         tags: |
           ghcr.io/dipy/gpustreamlines:${{ github.sha }}
           ghcr.io/dipy/gpustreamlines:latest
+        secrets: |
+          GIT_AUTH_TOKEN=${{ secrets.GITHUB_TOKEN }}
