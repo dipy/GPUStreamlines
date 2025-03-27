@@ -35,5 +35,3 @@ jobs:
         tags: |
           ghcr.io/dipy/gpustreamlines:${{ github.sha }}
           ghcr.io/dipy/gpustreamlines:latest
-        secrets: |
-          GIT_AUTH_TOKEN=${{ secrets.GITHUB_TOKEN }}
