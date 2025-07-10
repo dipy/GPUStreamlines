@@ -11,7 +11,7 @@
 #define DETERMINISTIC_BIAS 0 // Should be 0, higher values bias more towards higher fODF values when tracking 
 #define ALLOW_WEAK_LINK 0
 #define TRIES_PER_REJECTION_SAMPLING 1024
-#define DEFAULT_PTT_MINDATASUPPORT 0.0 // 0.01
+#define DEFAULT_PTT_MINDATASUPPORT 0.01 // 0.01
 #define K_SMALL 0.0001
 
 #define NORM_MIN_SUPPORT (DEFAULT_PTT_MINDATASUPPORT * PROBE_QUALITY)
