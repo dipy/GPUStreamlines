@@ -50,7 +50,7 @@
     cudaMemLocation loc;                                          \
     loc.type = cudaMemLocationTypeDevice;                         \
     loc.id   = (device);                                          \
-    CHECK_CUDA(cudaMemAdvise((devPtr), (count), (advice), loc));  \
+    CHECK_CUDA(cudaMemAdvise((devPtr), (count), (advice), loc));
 #else
 #define CUDA_MEM_ADVISE(devPtr, count, advice, device)            \
     CHECK_CUDA(cudaMemAdvise((devPtr), (count), (advice), (device)))
