@@ -146,9 +146,12 @@ class GPUTracker {
 
       //#pragma omp parallel for
       for (int n = 0; n < ngpus_; ++n) {
+	cudaMemLocation location = {};
+        location.type = cudaMemLocationTypeDevice;
+        location.id   = n;
         CHECK_CUDA(cudaSetDevice(n));
         CHECK_CUDA(cudaMallocManaged(&dataf_d[n], sizeof(*dataf_d[n]) * dataf_info.size));
-        CHECK_CUDA(cudaMemAdvise(dataf_d[n], sizeof(*dataf_d[n]) * dataf_info.size, cudaMemAdviseSetPreferredLocation, n));
+        CHECK_CUDA(cudaMemAdvise(dataf_d[n], sizeof(*dataf_d[n]) * dataf_info.size, cudaMemAdviseSetPreferredLocation, location));
         CHECK_CUDA(cudaMalloc(&H_d[n], sizeof(*H_d[n]) * H_info.size));
         CHECK_CUDA(cudaMalloc(&R_d[n], sizeof(*R_d[n]) * R_info.size));
         CHECK_CUDA(cudaMalloc(&delta_b_d[n], sizeof(*delta_b_d[n]) * delta_b_info.size));
