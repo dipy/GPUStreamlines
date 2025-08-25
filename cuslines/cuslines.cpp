@@ -146,7 +146,7 @@ class GPUTracker {
 
       //#pragma omp parallel for
       for (int n = 0; n < ngpus_; ++n) {
-	cudaMemLocation location = {};
+        cudaMemLocation location = {};
         location.type = cudaMemLocationTypeDevice;
         location.id   = n;
         CHECK_CUDA(cudaSetDevice(n));
