@@ -46,13 +46,11 @@
     }}
 
 #if CUDART_VERSION >= 13000
-#define CUDA_MEM_ADVISE(devPtr, count, advice, device)          \
-    do {                                                        \
-        cudaMemLocation loc;                                    \
-        loc.type = cudaMemLocationTypeDevice;                   \
-        loc.id   = (device);                                    \
-        CHECK_CUDA(cudaMemAdvise((devPtr), (count), (advice), loc)); \
-    } while (0)
+#define CUDA_MEM_ADVISE(devPtr, count, advice, device)            \
+    cudaMemLocation loc;                                          \
+    loc.type = cudaMemLocationTypeDevice;                         \
+    loc.id   = (device);                                          \
+    CHECK_CUDA(cudaMemAdvise((devPtr), (count), (advice), loc));  \
 #else
 #define CUDA_MEM_ADVISE(devPtr, count, advice, device)            \
     CHECK_CUDA(cudaMemAdvise((devPtr), (count), (advice), (device)))
