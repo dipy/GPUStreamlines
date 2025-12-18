@@ -29,7 +29,7 @@
 #ifndef __GLOBALS_H__
 #define __GLOBALS_H__
 
-#define REAL_SIZE 8
+#define REAL_SIZE 4
 
 #if REAL_SIZE == 4
 
@@ -84,6 +84,8 @@
 #define DIV_UP(a,b) (((a)+((b)-1))/(b))
 
 #define EXCESS_ALLOC_FACT 2
+
+#define NORM_EPS ((REAL)1e-8)
 
 #if 0
   #define DEBUG

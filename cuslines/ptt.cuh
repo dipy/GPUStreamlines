@@ -4,18 +4,16 @@
 #include "disc.h"
 #include "globals.h"
 
-#define STEP_FRAC 20 // divides output step size (usually 0.5) into this many internal steps
-#define PROBE_FRAC 2 // divides output step size (usually 0.5) to find probe length
-#define PROBE_QUALITY 4 // Number of probing steps
-#define SAMPLING_QUALITY 4 // can be 2-7
-#define DETERMINISTIC_BIAS 0 // Should be 0, higher values bias more towards higher fODF values when tracking 
-#define ALLOW_WEAK_LINK 0
-#define TRIES_PER_REJECTION_SAMPLING 1024
-#define DEFAULT_PTT_MINDATASUPPORT 0.01 // 0.01
-#define K_SMALL 0.0001
+#define STEP_FRAC (20) // divides output step size (usually 0.5) into this many internal steps
+#define PROBE_FRAC (2) // divides output step size (usually 0.5) to find probe length
+#define PROBE_QUALITY (4) // Number of probing steps
+#define SAMPLING_QUALITY (2) // can be 2-7
+#define ALLOW_WEAK_LINK (0)
+#define TRIES_PER_REJECTION_SAMPLING (1024)
+#define DEFAULT_PTT_MINDATASUPPORT ((REAL) 0.01) // 0.01
+#define K_SMALL ((REAL) 0.0001)
 
 #define NORM_MIN_SUPPORT (DEFAULT_PTT_MINDATASUPPORT * PROBE_QUALITY)
-#define PROBABILISTIC_GROUP_SZ POW2(DETERMINISTIC_BIAS)
 
 #if SAMPLING_QUALITY == 2
 #define DISC_VERT_CNT DISC_2_VERT_CNT

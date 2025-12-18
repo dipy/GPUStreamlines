@@ -59,7 +59,7 @@ __device__ void printArray(const char *name, int ncol, int n, REAL_T *arr) {
 }
 
 template<typename REAL_T>
-__device__ REAL_T interpolation_helper_d(const REAL_T* dataf, const REAL_T wgh[3][2], const long long coo[3][2], int dimy, int dimz, int dimt, int t) {
+__device__ REAL_T interpolation_helper_d(const REAL_T*__restrict__ dataf, const REAL_T wgh[3][2], const long long coo[3][2], int dimy, int dimz, int dimt, int t) {
     REAL_T __tmp = 0;
     #pragma unroll
     for (int i = 0; i < 2; i++) {
@@ -130,14 +130,12 @@ __device__ int trilinear_interp_d(const int dimx,
                 *__vox_data = interpolation_helper_d(dataf, wgh, coo, dimy, dimz, dimt, dimt_idx);
         }
 
-        /*
-        __syncwarp(WMASK);
-        if (tidx == 0 && threadIdx.y == 0) {
-                printf("point: %f, %f, %f\n", point.x, point.y, point.z);
-                for(int i = 0; i < dimt; i++) {
-                        printf("__vox_data[%d]: %f\n", i, __vox_data[i]);
-                }
-        }
-        */
+        // if (threadIdx.x == 0) {
+        //         printf("point: %f, %f, %f\n", point.x, point.y, point.z);
+        //         printf("dimt_idx: %d\n", dimt_idx);
+        //         // for(int i = 0; i < dimt; i++) {
+        //         //         printf("__vox_data[%d]: %f\n", i, __vox_data[i]);
+        //         // }
+        // }
         return 0;
 }
