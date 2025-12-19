@@ -22,7 +22,7 @@ __device__ __forceinline__ void crossnorm3_d(REAL_T *dest, const REAL_T *src1, c
 }
 
 template<int BDIM_X, typename REAL_T, typename REAL3_T>
-__device__ REAL_T interp4_d(const REAL3_T* pos, const REAL_T* frame, const REAL_T *__restrict__ pmf,
+__device__ REAL_T interp4_d(const REAL3_T pos, const REAL_T* frame, const REAL_T *__restrict__ pmf,
                             const int dimx, const int dimy, const int dimz, const int dimt,
                             const REAL3_T *__restrict__ odf_sphere_vertices) {
     const int tidx = threadIdx.x;
@@ -64,7 +64,7 @@ __device__ REAL_T interp4_d(const REAL3_T* pos, const REAL_T* frame, const REAL_
     }
 #endif
 
-    const int rv = trilinear_interp_d<THR_X_SL>(dimx, dimy, dimz, dimt, closest_odf_idx, pmf, *pos, &__max_cos);
+    const int rv = trilinear_interp_d<THR_X_SL>(dimx, dimy, dimz, dimt, closest_odf_idx, pmf, pos, &__max_cos);
 
     if (rv != 0) {
         return 0;  // No support
@@ -193,6 +193,7 @@ __device__ REAL_T calculate_data_support_d(REAL_T support,
                                            const REAL3_T pos, const REAL_T *__restrict__ pmf,
                                            const int dimx, const int dimy, const int dimz, const int dimt,
                                            const REAL_T probe_step_size,
+                                           const REAL_T absolpmf_thresh,
                                            const REAL3_T *__restrict__ odf_sphere_vertices,
                                            REAL_T* probing_prop_sh,
                                            REAL_T* direc_sh, 
@@ -227,12 +228,12 @@ __device__ REAL_T calculate_data_support_d(REAL_T support,
         }
         __syncwarp(WMASK);
 
-        const REAL_T fod_amp = interp4_d<BDIM_X>(
-            probing_pos_sh, probing_frame_sh, pmf,
+        const REAL_T fod_amp = interp4_d<BDIM_X>( // This is the most expensive call
+            *probing_pos_sh, probing_frame_sh, pmf,
             dimx, dimy, dimz, dimt,
             odf_sphere_vertices);
 
-        if (!ALLOW_WEAK_LINK && (fod_amp < PMF_THRESHOLD_P)) {
+        if (!ALLOW_WEAK_LINK && (fod_amp < absolpmf_thresh)) {
             return 0;
         }
         support += fod_amp;
@@ -292,8 +293,9 @@ __device__ int get_direction_ptt_d(
     REAL_T *__direc_sh = direc_sh + tidy*3;
     REAL3_T *__probing_pos_sh = probing_pos_sh + tidy;
 
-    const REAL_T max_curvature = SIN(max_angle / 2) / step_size; // bigger numbers means wiggle more
     const REAL_T probe_step_size = ((step_size / PROBE_FRAC) / (PROBE_QUALITY - 1));
+    const REAL_T max_curvature = 2.0 * SIN(max_angle / 2.0) / step_size;
+    const REAL_T absolpmf_thresh = PMF_THRESHOLD_P * max_d<BDIM_X>(dimt, pmf, REAL_MIN);
 
     REAL_T __tmp;
 
@@ -307,7 +309,7 @@ __device__ int get_direction_ptt_d(
     }
 
     const REAL_T first_val = interp4_d<BDIM_X>(
-        __probing_pos_sh, __frame_sh, pmf,
+        pos, __frame_sh, pmf,
         dimx, dimy, dimz, dimt,
         odf_sphere_vertices);
     __syncwarp(WMASK);
@@ -326,6 +328,7 @@ __device__ int get_direction_ptt_d(
             first_val,
             pos, pmf, dimx, dimy, dimz, dimt,
             probe_step_size,
+            absolpmf_thresh,
             odf_sphere_vertices,
             __probing_prop_sh, __direc_sh, __probing_pos_sh,
             __k1_probe_sh, __k2_probe_sh,
@@ -337,7 +340,7 @@ __device__ int get_direction_ptt_d(
         }
 #endif
 
-        if (this_support < NORM_MIN_SUPPORT) {
+        if (this_support < PROBE_QUALITY * absolpmf_thresh) {
             if (tidx == 0) {
                 __vert_pdf_sh[ii] = 0;
             }
@@ -441,13 +444,14 @@ __device__ int get_direction_ptt_d(
             first_val,
             pos, pmf, dimx, dimy, dimz, dimt,
             probe_step_size,
+            absolpmf_thresh,
             odf_sphere_vertices,
             __probing_prop_sh, __direc_sh, __probing_pos_sh,
             __k1_probe_sh, __k2_probe_sh,
             __probing_frame_sh);
         __syncwarp(WMASK);
 
-        if (this_support < NORM_MIN_SUPPORT) {
+        if (this_support < PROBE_QUALITY * absolpmf_thresh) {
             continue;
         }
 
@@ -459,6 +463,7 @@ __device__ int get_direction_ptt_d(
                 prepare_propagator_d(
                     *__k1_probe_sh, *__k2_probe_sh,
                     step_size/STEP_FRAC, __probing_prop_sh);
+                get_probing_frame_d<0>(__frame_sh, st, __probing_frame_sh);
                 propogate_frame_d(__probing_prop_sh, __probing_frame_sh, __direc_sh);
                 norm3_d(__direc_sh, 0); // this will be scaled by the generic stepping code
                 dirs[0] = (REAL3_T) {__direc_sh[0], __direc_sh[1], __direc_sh[2]};

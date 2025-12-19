@@ -70,7 +70,7 @@
 #endif
 
 #define MAX_SLINE_LEN	(501)
-#define PMF_THRESHOLD_P	((REAL)0.1)
+#define PMF_THRESHOLD_P	((REAL)0.05)
 
 #define THR_X_BL (64)
 #define THR_X_SL (32)
