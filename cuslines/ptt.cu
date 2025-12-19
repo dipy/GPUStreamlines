@@ -34,7 +34,7 @@ __device__ REAL_T interp4_d(const REAL3_T pos, const REAL_T* frame, const REAL_T
     REAL_T __max_cos = REAL_T(0);
 
     #pragma unroll
-    for (int ii = tidx; ii < dimt; ii+= BDIM_X) {
+    for (int ii = tidx; ii < dimt; ii+= BDIM_X) {  // TODO: I need to think about better ways of parallelizing this
         REAL_T cos_sim = FABS(
             odf_sphere_vertices[ii].x * frame[0] \
             + odf_sphere_vertices[ii].y * frame[1] \
@@ -64,6 +64,7 @@ __device__ REAL_T interp4_d(const REAL3_T pos, const REAL_T* frame, const REAL_T
     }
 #endif
 
+    // TODO: maybe this should be texture memory, I am not so sure
     const int rv = trilinear_interp_d<THR_X_SL>(dimx, dimy, dimz, dimt, closest_odf_idx, pmf, pos, &__max_cos);
 
     if (rv != 0) {
@@ -294,7 +295,7 @@ __device__ int get_direction_ptt_d(
     REAL3_T *__probing_pos_sh = probing_pos_sh + tidy;
 
     const REAL_T probe_step_size = ((step_size / PROBE_FRAC) / (PROBE_QUALITY - 1));
-    const REAL_T max_curvature = 2.0 * SIN(max_angle / 2.0) / step_size;
+    const REAL_T max_curvature = 2.0 * SIN(max_angle / 2.0) / (step_size / PROBE_FRAC);
     const REAL_T absolpmf_thresh = PMF_THRESHOLD_P * max_d<BDIM_X>(dimt, pmf, REAL_MIN);
 
     REAL_T __tmp;
