@@ -171,7 +171,7 @@ __device__ void get_probing_frame_d(const REAL_T* frame, curandStatePhilox4_32_1
 }
 
 template<typename REAL_T>
-__device__ void propogate_frame_d(REAL_T* propagator, REAL_T* frame, REAL_T* direc) {
+__device__ void propagate_frame_d(REAL_T* propagator, REAL_T* frame, REAL_T* direc) {
     REAL_T __tmp[3];
 
     for (int ii = 0; ii < 3; ii++) {
@@ -218,7 +218,7 @@ __device__ REAL_T calculate_data_support_d(REAL_T support,
 
     for (int ii = 0; ii < PROBE_QUALITY; ii++) { // we spend about 2/3 of our time in this loop when doing PTT
         if (tidx == 0) {
-            propogate_frame_d(
+            propagate_frame_d(
                 probing_prop_sh,
                 probing_frame_sh,
                 direc_sh);
@@ -466,12 +466,12 @@ __device__ int get_direction_ptt_d(
             if (IS_INIT) {
                 dirs[0] = dir;
             } else {
-                // Propogate, but only 1/STEP_FRAC of a step
+                // propagate, but only 1/STEP_FRAC of a step
                 prepare_propagator_d(
                     *__k1_probe_sh, *__k2_probe_sh,
                     step_size/STEP_FRAC, __probing_prop_sh);
                 get_probing_frame_d<0>(__frame_sh, st, __probing_frame_sh);
-                propogate_frame_d(__probing_prop_sh, __probing_frame_sh, __direc_sh);
+                propagate_frame_d(__probing_prop_sh, __probing_frame_sh, __direc_sh);
                 norm3_d(__direc_sh, 0); // this will be scaled by the generic stepping code
                 dirs[0] = (REAL3_T) {__direc_sh[0], __direc_sh[1], __direc_sh[2]};
             }
