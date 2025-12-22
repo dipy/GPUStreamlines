@@ -295,8 +295,14 @@ __device__ int get_direction_ptt_d(
     REAL3_T *__probing_pos_sh = probing_pos_sh + tidy;
 
     const REAL_T probe_step_size = ((step_size / PROBE_FRAC) / (PROBE_QUALITY - 1));
-    const REAL_T max_curvature = 2.0 * SIN(max_angle / 2.0) / (step_size / PROBE_FRAC);
+    const REAL_T max_curvature = 2.0 * SIN(max_angle / 2.0) / step_size;
     const REAL_T absolpmf_thresh = PMF_THRESHOLD_P * max_d<BDIM_X>(dimt, pmf, REAL_MIN);
+
+#if 0
+        printf("absolpmf_thresh: %f, max_curvature: %f, probe_step_size: %f\n", absolpmf_thresh, max_curvature, probe_step_size);
+        printf("max_angle: %f\n", max_angle);
+        printf("step_size: %f\n", step_size);
+#endif
 
     REAL_T __tmp;
 
