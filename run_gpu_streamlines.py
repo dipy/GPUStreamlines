@@ -33,11 +33,10 @@ import time
 import zipfile
 
 import numpy as np
-import numpy.linalg as npl
 
 import dipy.reconst.dti as dti
 from dipy.io import read_bvals_bvecs
-from dipy.io.stateful_tractogram import Origin, Space, StatefulTractogram
+from dipy.io.stateful_tractogram import Space, StatefulTractogram
 from dipy.io.streamline import save_tractogram
 from dipy.tracking import utils
 from dipy.core.gradients import gradient_table, unique_bvals_magnitude
