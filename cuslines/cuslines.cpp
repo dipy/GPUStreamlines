@@ -61,12 +61,12 @@ py::capsule cleanup(T* ptr) {
 class GPUTracker {
   public:
     GPUTracker(ModelType model_type,
-               double max_angle,
-               double min_signal,
-               double tc_threshold,
-               double step_size,
-               double relative_peak_thresh,
-               double min_separation_angle,
+               REAL max_angle,
+               REAL min_signal,
+               REAL tc_threshold,
+               REAL step_size,
+               REAL relative_peak_thresh,
+               REAL min_separation_angle,
                np_array_cast dataf,
                np_array_cast H,
                np_array_cast R,
@@ -148,7 +148,8 @@ class GPUTracker {
       for (int n = 0; n < ngpus_; ++n) {
         CHECK_CUDA(cudaSetDevice(n));
         CHECK_CUDA(cudaMallocManaged(&dataf_d[n], sizeof(*dataf_d[n]) * dataf_info.size));
-        CHECK_CUDA(cudaMemAdvise(dataf_d[n], sizeof(*dataf_d[n]) * dataf_info.size, cudaMemAdviseSetPreferredLocation, n));
+        CUDA_MEM_ADVISE(dataf_d[n], sizeof(*dataf_d[n]) * dataf_info.size, cudaMemAdviseSetPreferredLocation, n);
+        // CHECK_CUDA(cudaMemPrefetchAsync(&dataf_d[n], sizeof(*dataf_d[n]) * dataf_info.size, n));
         CHECK_CUDA(cudaMalloc(&H_d[n], sizeof(*H_d[n]) * H_info.size));
         CHECK_CUDA(cudaMalloc(&R_d[n], sizeof(*R_d[n]) * R_info.size));
         CHECK_CUDA(cudaMalloc(&delta_b_d[n], sizeof(*delta_b_d[n]) * delta_b_info.size));
@@ -294,12 +295,12 @@ class GPUTracker {
     int delta_nr_, samplm_nr_;
 
     ModelType model_type_;
-    double max_angle_;
-    double tc_threshold_;
-    double min_signal_;
-    double step_size_;
-    double relative_peak_thresh_;
-    double min_separation_angle_;
+    REAL max_angle_;
+    REAL tc_threshold_;
+    REAL min_signal_;
+    REAL step_size_;
+    REAL relative_peak_thresh_;
+    REAL min_separation_angle_;
 
     std::vector<int> nSlines_old_;
     std::vector<REAL*> slines_;
@@ -332,8 +333,8 @@ PYBIND11_MODULE(cuslines, m) {
     .value("PTT", PTT);
 
   py::class_<GPUTracker>(m, "GPUTracker")
-    .def(py::init<ModelType, double, double, double, double,
-                  double, double,
+    .def(py::init<ModelType, REAL, REAL, REAL, REAL,
+                  REAL, REAL,
 		              np_array_cast, np_array_cast,
                   np_array_cast, np_array_cast,
                   np_array_cast, np_array_int_cast,

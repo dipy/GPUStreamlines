@@ -309,30 +309,6 @@ __device__ VAL_T max_mask_transl_d(const int n,
 
 template<int BDIM_X,
          typename VAL_T>
-__device__ VAL_T max_d(const int n, const VAL_T *__restrict__ src, const VAL_T minVal) {
-
-        const int tidx = threadIdx.x;
-
-        const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
-        const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
-
-        VAL_T __m = minVal;
-
-        for(int i = tidx; i < n; i += BDIM_X) {
-		__m = MAX(__m, src[i]);
-        }
-
-        #pragma unroll
-        for(int i = BDIM_X/2; i; i /= 2) {
-                const VAL_T __tmp = __shfl_xor_sync(WMASK, __m, i, BDIM_X);
-                __m = MAX(__m, __tmp);
-        }
-
-        return __m;
-}
-
-template<int BDIM_X,
-         typename VAL_T>
 __device__ VAL_T min_d(const int n, const VAL_T *__restrict__ src, const VAL_T maxVal) {
 
         const int tidx = threadIdx.x;

@@ -16,17 +16,20 @@ RUN wget https://github.com/Kitware/CMake/releases/download/v3.24.0/cmake-3.24.0
     && mkdir /opt/cmake \
     && /tmp/cmake-install.sh --skip-license --prefix=/opt/cmake \
     && rm /tmp/cmake-install.sh
-ENV PATH /opt/cmake/bin:${PATH}
+ENV PATH=/opt/cmake/bin:${PATH}
 
 RUN curl -L "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh" \
     -o "/tmp/Miniconda3.sh"
 RUN bash /tmp/Miniconda3.sh -b -p /opt/anaconda
 RUN rm -rf /tmp/Miniconda3.sh
 RUN cd /opt && eval "$(/opt/anaconda/bin/conda shell.bash hook)"
-ENV PATH /opt/anaconda/bin:${PATH}
-ENV LD_LIBRARY_PATH /opt/anaconda/lib:${LD_LIBRARY_PATH}
+ENV PATH=/opt/anaconda/bin:${PATH}
+ENV LD_LIBRARY_PATH=/opt/anaconda/lib:${LD_LIBRARY_PATH}
 
 # python prereqs
+RUN conda tos accept --override-channels --channel conda-forge
+RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
 RUN conda install -c conda-forge git
 RUN pip install numpy>=2.0.0
 RUN pip install scipy>=1.13.0 cython nibabel dipy tqdm

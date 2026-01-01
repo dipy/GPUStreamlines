@@ -37,7 +37,12 @@ SMS ?= 70
 CUDA_ARCH = $(foreach SM,$(SMS),-gencode arch=compute_$(SM),code=sm_$(SM))
 LASTSM := $(lastword $(sort $(SMS)))
 CUDA_ARCH += -gencode arch=compute_$(LASTSM),code=compute_$(LASTSM)
-CUDACFLAGS=-c -O3 -lineinfo -Xptxas=-v -std=c++11 -Xcompiler -fPIC -Xcompiler=-fopenmp $(CUDA_ARCH)
+
+COMMON_FLAGS = -c -std=c++11 -Xcompiler -fPIC --use_fast_math -Xcompiler=-fopenmp $(CUDA_ARCH)
+RELEASE_FLAGS = -O3 -Xptxas=-O3
+DEBUG_FLAGS   = -O0 -Xptxas=-v -g -G -lineinfo
+CUDACFLAGS = $(COMMON_FLAGS) $(RELEASE_FLAGS)
+
 LDFLAGS= -shared -fopenmp -L$(CUDA_HOME)/lib64 -lcudart -lnvToolsExt
 
 all: cuslines

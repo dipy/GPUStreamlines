@@ -29,7 +29,7 @@
 #ifndef __GLOBALS_H__
 #define __GLOBALS_H__
 
-#define REAL_SIZE 8
+#define REAL_SIZE 4
 
 #if REAL_SIZE == 4
 
@@ -70,7 +70,7 @@
 #endif
 
 #define MAX_SLINE_LEN	(501)
-#define PMF_THRESHOLD_P	((REAL)0.1)
+#define PMF_THRESHOLD_P	((REAL)0.05)
 
 #define THR_X_BL (64)
 #define THR_X_SL (32)
@@ -84,6 +84,8 @@
 #define DIV_UP(a,b) (((a)+((b)-1))/(b))
 
 #define EXCESS_ALLOC_FACT 2
+
+#define NORM_EPS ((REAL)1e-8)
 
 #if 0
   #define DEBUG

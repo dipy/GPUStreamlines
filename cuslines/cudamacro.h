@@ -45,6 +45,18 @@
         exit(EXIT_FAILURE);                                                  \
     }}
 
+#if CUDART_VERSION >= 13000
+#define CUDA_MEM_ADVISE(devPtr, count, advice, device)            \
+    cudaMemLocation loc;                                          \
+    loc.type = cudaMemLocationTypeDevice;                         \
+    loc.id   = (device);                                          \
+    CHECK_CUDA(cudaMemAdvise((devPtr), (count), (advice), loc));
+#else
+#define CUDA_MEM_ADVISE(devPtr, count, advice, device)            \
+    CHECK_CUDA(cudaMemAdvise((devPtr), (count), (advice), (device)))
+#endif
+
+
 #ifdef USE_NVTX
 #include "nvToolsExt.h"
 

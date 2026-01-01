@@ -1,3 +1,26 @@
+template<int BDIM_X,
+         typename VAL_T>
+__device__ VAL_T max_d(const int n, const VAL_T *__restrict__ src, const VAL_T minVal) {
+
+        const int tidx = threadIdx.x;
+
+        const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
+        const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
+
+        VAL_T __m = minVal;
+
+        for(int i = tidx; i < n; i += BDIM_X) {
+		__m = MAX(__m, src[i]);
+        }
+
+        #pragma unroll
+        for(int i = BDIM_X/2; i; i /= 2) {
+                const VAL_T __tmp = __shfl_xor_sync(WMASK, __m, i, BDIM_X);
+                __m = MAX(__m, __tmp);
+        }
+
+        return __m;
+}
 
 template<int BDIM_X, typename REAL_T>
 __device__ void prefix_sum_sh_d(REAL_T *num_sh, int __len) {
@@ -59,7 +82,7 @@ __device__ void printArray(const char *name, int ncol, int n, REAL_T *arr) {
 }
 
 template<typename REAL_T>
-__device__ REAL_T interpolation_helper_d(const REAL_T* dataf, const REAL_T wgh[3][2], const long long coo[3][2], int dimy, int dimz, int dimt, int t) {
+__device__ REAL_T interpolation_helper_d(const REAL_T*__restrict__ dataf, const REAL_T wgh[3][2], const long long coo[3][2], int dimy, int dimz, int dimt, int t) {
     REAL_T __tmp = 0;
     #pragma unroll
     for (int i = 0; i < 2; i++) {
@@ -130,14 +153,12 @@ __device__ int trilinear_interp_d(const int dimx,
                 *__vox_data = interpolation_helper_d(dataf, wgh, coo, dimy, dimz, dimt, dimt_idx);
         }
 
-        /*
-        __syncwarp(WMASK);
-        if (tidx == 0 && threadIdx.y == 0) {
-                printf("point: %f, %f, %f\n", point.x, point.y, point.z);
-                for(int i = 0; i < dimt; i++) {
-                        printf("__vox_data[%d]: %f\n", i, __vox_data[i]);
-                }
-        }
-        */
+        // if (threadIdx.x == 0) {
+        //         printf("point: %f, %f, %f\n", point.x, point.y, point.z);
+        //         printf("dimt_idx: %d\n", dimt_idx);
+        //         // for(int i = 0; i < dimt; i++) {
+        //         //         printf("__vox_data[%d]: %f\n", i, __vox_data[i]);
+        //         // }
+        // }
         return 0;
 }
