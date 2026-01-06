@@ -473,7 +473,7 @@ __device__ int get_direction_ptt_d(
                 get_probing_frame_d<0>(__frame_sh, st, __probing_frame_sh);
                 propagate_frame_d(__probing_prop_sh, __probing_frame_sh, __direc_sh);
                 norm3_d(__direc_sh, 0); // this will be scaled by the generic stepping code
-                dirs[0] = (REAL3_T) {__direc_sh[0], __direc_sh[1], __direc_sh[2]};
+                dirs[0] = MAKE_REAL3(__direc_sh[0], __direc_sh[1], __direc_sh[2]);
             }
         }
 

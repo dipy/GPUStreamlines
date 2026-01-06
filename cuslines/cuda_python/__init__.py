@@ -1,5 +1,5 @@
-from .cuda_python import (
-    GPUTracker,
+from .cu_tractography import GPUTracker
+from .cu_direction_getters import (
     ProbDirectionGetter,
     PttDirectionGetter,
     BootDirectionGetter

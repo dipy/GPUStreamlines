@@ -26,22 +26,30 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+// TODO: its possible all the cpp should be refactored
+// out into a separate file, but for now, they are just wrapped
+// in these ifndefs
+#ifndef __NVRTC__
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <getopt.h>
+#endif
+
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
+
+#ifndef __NVRTC__
 #include <cfloat>
 #include <omp.h>
 #include <vector>
-#include <cmath>
+#include <cmath> // Might not be needed anymore?
+#include <iostream>
+#endif
 
 #include "cudamacro.h" /* for time() */
 #include "globals.h"
-
-#include <iostream>
 
 #include "cuwsort.cuh"
 #include "ptt.cuh"
@@ -1204,7 +1212,6 @@ template<int BDIM_X,
          typename REAL3_T>
 __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
 			 const REAL_T max_angle,
-			 const REAL_T min_signal,
 			 const REAL_T tc_threshold,
 			 const REAL_T step_size,
 			 const REAL_T relative_peak_thres,
@@ -1218,22 +1225,9 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                          const int dimz,
                          const int dimt,
                          const REAL_T *__restrict__ dataf,
-                         const int *__restrict__ b0s_mask, // not using this (and its opposite, dwi_mask)
-                         const REAL_T *__restrict__ H, 
-                         const REAL_T *__restrict__ R,
-                         // model unused
-                         // step_size from global defines
-                         // max_angle, pmf_threshold from global defines
-                         // b0s_mask already passed
-                         // min_signal from global defines
-                         // tc_threshold from global defines
-                         // pmf_threashold from global defines
                          const REAL_T *__restrict__ metric_map,
-			 const int delta_nr,
-                         const REAL_T *__restrict__ delta_b,
-                         const REAL_T *__restrict__ delta_q, // fit_matrix
-			 const int samplm_nr,
-                         const REAL_T *__restrict__ sampling_matrix,
+                         const typename ModelCtx<MODEL_T, REAL_T>::type* __restrict__ ctx,
+			             const int samplm_nr,
                          const REAL3_T *__restrict__ sphere_vertices,
                          const int2 *__restrict__ sphere_edges,
                          const int num_edges,
@@ -1272,7 +1266,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
         int i;
         for(i = 1; i < MAX_SLINE_LEN*step_frac; i++) {
                 int ndir;
-                if (MODEL_T == PROB) {
+                if constexpr (MODEL_T == PROB) {
                         ndir = get_direction_prob_d<BDIM_X,
                                                     BDIM_Y,
                                                     0>(
@@ -1288,7 +1282,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                                                         sphere_edges,
                                                         num_edges,
                                                         __sh_new_dir + tidy);
-                } else if (MODEL_T == PTT) {
+                } else if constexpr (MODEL_T == PTT) {
                         ndir = get_direction_ptt_d<BDIM_X,
                                                    BDIM_Y,
                                                    0>(
@@ -1310,22 +1304,18 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                                                     MODEL_T>(
                                                         st,
                                                         max_angle,
-                                                        min_signal,
+                                                        ctx->min_signal,
                                                         relative_peak_thres,
                                                         min_separation_angle,
                                                         direction,
                                                         dimx, dimy, dimz, dimt, dataf,
-                                                        b0s_mask /* !dwi_mask */,
+                                                        ctx->b0s_mask /* !dwi_mask */,
                                                         point,
-                                                        H, R,
-                                                        // model unused
-                                                        // max_angle, pmf_threshold from global defines
-                                                        // b0s_mask already passed
-                                                        // min_signal from global defines
-                                                        delta_nr,
-                                                        delta_b, delta_q, // fit_matrix
+                                                        ctx->H, ctx->R,
+                                                        ctx->delta_nr,
+                                                        ctx->delta_b, ctx->delta_q, // fit_matrix
                                                         samplm_nr,
-                                                        sampling_matrix,
+                                                        ctx->sampling_matrix,
                                                         sphere_vertices,
                                                         sphere_edges,
                                                         num_edges,
@@ -1603,7 +1593,6 @@ template<int BDIM_X,
          typename REAL3_T>
 __global__ void genStreamlinesMerge_k(
 				      const REAL_T max_angle,
-				      const REAL_T min_signal,
 				      const REAL_T tc_threshold,
 				      const REAL_T step_size,
 				      const REAL_T relative_peak_thres,
@@ -1617,15 +1606,9 @@ __global__ void genStreamlinesMerge_k(
                                       const int dimz,
                                       const int dimt,
                                       const REAL_T *__restrict__ dataf,
-                                      const REAL_T *__restrict__ H,
-                                      const REAL_T *__restrict__ R,
-				      const int delta_nr,
-                                      const REAL_T *__restrict__ delta_b,
-                                      const REAL_T *__restrict__ delta_q,
-                                      const int    *__restrict__ b0s_mask, // change to int
                                       const REAL_T *__restrict__ metric_map,
-				      const int samplm_nr,
-                                      const REAL_T *__restrict__ sampling_matrix,
+                                      const typename ModelCtx<MODEL_T, REAL_T>::type* __restrict__ ctx,
+				                      const int samplm_nr,
                                       const REAL3_T *__restrict__ sphere_vertices,
                                       const int2 *__restrict__ sphere_edges,
                                       const int num_edges,
@@ -1715,7 +1698,6 @@ __global__ void genStreamlinesMerge_k(
                                                     BDIM_Y,
                                                     MODEL_T>(&st,
 		                		             max_angle,
-			        		             min_signal,
 			        			     tc_threshold,
 	                        			     step_size,
 	                        			     relative_peak_thres,
@@ -1725,13 +1707,9 @@ __global__ void genStreamlinesMerge_k(
                                                              __ptt_frame,
                                                              MAKE_REAL3(1, 1, 1),
                                                              dimx, dimy, dimz, dimt, dataf,
-                                                             b0s_mask,
-                                                             H, R,
                                                              metric_map,
-			                                     delta_nr,
-                                                             delta_b, delta_q, //fit_matrix
-		                			     samplm_nr,
-                                                             sampling_matrix,
+                                                             ctx,
+		                			                         samplm_nr,
                                                              sphere_vertices,
                                                              sphere_edges,
                                                              num_edges,
@@ -1755,7 +1733,6 @@ __global__ void genStreamlinesMerge_k(
                                                     BDIM_Y,
                                                     MODEL_T>(&st,
      	                    			             max_angle,
-			        		             min_signal,
 		        				     tc_threshold,
 	                				     step_size,
 			    				     relative_peak_thres,
@@ -1765,13 +1742,9 @@ __global__ void genStreamlinesMerge_k(
                                                              __ptt_frame + 9,
                                                              MAKE_REAL3(1, 1, 1),
                                                              dimx, dimy, dimz, dimt, dataf,
-                                                             b0s_mask,
-                                                             H, R,
                                                              metric_map,
-			        			     delta_nr,
-                                                             delta_b, delta_q, //fit_matrix
-			        			     samplm_nr,
-                                                             sampling_matrix,
+                                                             ctx,
+			        			                             samplm_nr,
                                                              sphere_vertices,
                                                              sphere_edges,
                                                              num_edges,
@@ -1802,15 +1775,16 @@ __global__ void genStreamlinesMerge_k(
         return;
 }
 
+#ifndef __NVRTC__
 void generate_streamlines_cuda_mgpu(const ModelType model_type, const REAL max_angle, const REAL min_signal, const REAL tc_threshold, const REAL step_size,
                                     const REAL relative_peak_thresh, const REAL min_separation_angle,
                                     const int nseeds, const std::vector<REAL*> &seeds_d,
                                     const int dimx, const int dimy, const int dimz, const int dimt,
                                     const std::vector<REAL*> &dataf_d, const std::vector<REAL*> &H_d, const std::vector<REAL*> &R_d,
-			            const int delta_nr,
+			                        const int delta_nr,
                                     const std::vector<REAL*> &delta_b_d, const std::vector<REAL*> &delta_q_d,
                                     const std::vector<int*> &b0s_mask_d, const std::vector<REAL*> &metric_map_d,
-			            const int samplm_nr,
+			                        const int samplm_nr,
                                     const std::vector<REAL*> &sampling_matrix_d,
                                     const std::vector<REAL*> &sphere_vertices_d, const std::vector<int*> &sphere_edges_d, const int nedges,
                                     std::vector<REAL*> &slines_h, std::vector<int*> &slinesLen_h, std::vector<int> &nSlines_h,
@@ -1985,25 +1959,45 @@ void generate_streamlines_cuda_mgpu(const ModelType model_type, const REAL max_a
 #endif
 
     //fprintf(stderr, "Launching kernel with %u blocks of size (%u, %u)\n", grid.x, block.x, block.y);
-    switch(model_type) {
+    switch(model_type) {  // TODO: these may be better as separate functions, not as template specializations
         case OPDT:
-            genStreamlinesMerge_k<THR_X_SL, THR_X_BL/THR_X_SL, OPDT> <<<grid, block, shSizeGNS, streams[n]>>>(
-                max_angle, min_signal, tc_threshold, step_size, relative_peak_thresh, min_separation_angle,
-                rng_seed, rng_offset + n*nseeds_per_gpu, nseeds_gpu, reinterpret_cast<const REAL3 *>(seeds_d[n]),
-                dimx, dimy, dimz, dimt, dataf_d[n], H_d[n], R_d[n], delta_nr, delta_b_d[n], delta_q_d[n],
-                b0s_mask_d[n], metric_map_d[n], samplm_nr, sampling_matrix_d[n],
-                reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]), reinterpret_cast<const int2 *>(sphere_edges_d[n]),
-                nedges, slinesOffs_d[n], shDirTemp0_d[n], slineSeed_d[n], slineLen_d[n], sline_d[n]);
-            break;
-
         case CSA:
-            genStreamlinesMerge_k<THR_X_SL, THR_X_BL/THR_X_SL, CSA> <<<grid, block, shSizeGNS, streams[n]>>>(
-                max_angle, min_signal, tc_threshold, step_size, relative_peak_thresh, min_separation_angle,
-                rng_seed, rng_offset + n*nseeds_per_gpu, nseeds_gpu, reinterpret_cast<const REAL3 *>(seeds_d[n]),
-                dimx, dimy, dimz, dimt, dataf_d[n], H_d[n], R_d[n], delta_nr, delta_b_d[n], delta_q_d[n],
-                b0s_mask_d[n], metric_map_d[n], samplm_nr, sampling_matrix_d[n],
-                reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]), reinterpret_cast<const int2 *>(sphere_edges_d[n]),
-                nedges, slinesOffs_d[n], shDirTemp0_d[n], slineSeed_d[n], slineLen_d[n], sline_d[n]);
+            BootCtx<REAL>* d_ctx;
+            BootCtx<REAL> h_ctx;
+            h_ctx.min_signal      = min_signal;
+            h_ctx.delta_nr        = delta_nr;
+            h_ctx.H               = H_d[n];
+            h_ctx.R               = R_d[n];
+            h_ctx.delta_b         = delta_b_d[n];
+            h_ctx.delta_q         = delta_q_d[n];
+            h_ctx.sampling_matrix = sampling_matrix_d[n];
+            h_ctx.b0s_mask        = b0s_mask_d[n];
+            CHECK_CUDA(cudaMalloc(&d_ctx, sizeof(BootCtx<REAL>)));
+            CHECK_CUDA(cudaMemcpyAsync(
+                d_ctx, &h_ctx, sizeof(BootCtx<REAL>),
+                cudaMemcpyHostToDevice, streams[n]));
+
+            if (model_type == OPDT) {
+                genStreamlinesMerge_k<THR_X_SL, THR_X_BL/THR_X_SL, OPDT> <<<grid, block, shSizeGNS, streams[n]>>>(
+                    max_angle, tc_threshold, step_size, relative_peak_thresh, min_separation_angle,
+                    rng_seed, rng_offset + n*nseeds_per_gpu, nseeds_gpu, reinterpret_cast<const REAL3 *>(seeds_d[n]),
+                    dimx, dimy, dimz, dimt, dataf_d[n],
+                    metric_map_d[n], d_ctx, samplm_nr,
+                    reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]), reinterpret_cast<const int2 *>(sphere_edges_d[n]),
+                    nedges, slinesOffs_d[n], shDirTemp0_d[n], slineSeed_d[n], slineLen_d[n], sline_d[n]);
+            } else if (model_type == CSA) {
+                genStreamlinesMerge_k<THR_X_SL, THR_X_BL/THR_X_SL, CSA> <<<grid, block, shSizeGNS, streams[n]>>>(
+                    max_angle, tc_threshold, step_size, relative_peak_thresh, min_separation_angle,
+                    rng_seed, rng_offset + n*nseeds_per_gpu, nseeds_gpu, reinterpret_cast<const REAL3 *>(seeds_d[n]),
+                    dimx, dimy, dimz, dimt, dataf_d[n],
+                    metric_map_d[n], d_ctx, samplm_nr,
+                    reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]), reinterpret_cast<const int2 *>(sphere_edges_d[n]),
+                    nedges, slinesOffs_d[n], shDirTemp0_d[n], slineSeed_d[n], slineLen_d[n], sline_d[n]);
+            } else {
+                // Should never reach here
+            }
+            
+            CHECK_CUDA(cudaFree(d_ctx));
             break;
 
         case PROB:
@@ -2011,10 +2005,10 @@ void generate_streamlines_cuda_mgpu(const ModelType model_type, const REAL max_a
             // than for preliminary run
             shSizeGNS = sizeof(REAL)*(THR_X_BL/THR_X_SL)*n32dimt;
             genStreamlinesMerge_k<THR_X_SL, THR_X_BL/THR_X_SL, PROB> <<<grid, block, shSizeGNS, streams[n]>>>(
-                max_angle, min_signal, tc_threshold, step_size, relative_peak_thresh, min_separation_angle,
+                max_angle, tc_threshold, step_size, relative_peak_thresh, min_separation_angle,
                 rng_seed, rng_offset + n*nseeds_per_gpu, nseeds_gpu, reinterpret_cast<const REAL3 *>(seeds_d[n]),
-                dimx, dimy, dimz, dimt, dataf_d[n], H_d[n], R_d[n], delta_nr, delta_b_d[n], delta_q_d[n],
-                b0s_mask_d[n], metric_map_d[n], samplm_nr, sampling_matrix_d[n],
+                dimx, dimy, dimz, dimt, dataf_d[n],
+                metric_map_d[n], nullptr, samplm_nr,
                 reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]), reinterpret_cast<const int2 *>(sphere_edges_d[n]),
                 nedges, slinesOffs_d[n], shDirTemp0_d[n], slineSeed_d[n], slineLen_d[n], sline_d[n]);
             break;
@@ -2022,10 +2016,10 @@ void generate_streamlines_cuda_mgpu(const ModelType model_type, const REAL max_a
         case PTT:
             shSizeGNS = 0; // PTT uses exclusively static shared memory
             genStreamlinesMerge_k<THR_X_SL, THR_X_BL/THR_X_SL, PTT> <<<grid, block, shSizeGNS, streams[n]>>>(
-                max_angle, min_signal, tc_threshold, step_size, relative_peak_thresh, min_separation_angle,
+                max_angle, tc_threshold, step_size, relative_peak_thresh, min_separation_angle,
                 rng_seed, rng_offset + n*nseeds_per_gpu, nseeds_gpu, reinterpret_cast<const REAL3 *>(seeds_d[n]),
-                dimx, dimy, dimz, dimt, dataf_d[n], H_d[n], R_d[n], delta_nr, delta_b_d[n], delta_q_d[n],
-                b0s_mask_d[n], metric_map_d[n], samplm_nr, sampling_matrix_d[n],
+                dimx, dimy, dimz, dimt, dataf_d[n],
+                metric_map_d[n], nullptr, samplm_nr,
                 reinterpret_cast<const REAL3 *>(sphere_vertices_d[n]), reinterpret_cast<const int2 *>(sphere_edges_d[n]),
                 nedges, slinesOffs_d[n], shDirTemp0_d[n], slineSeed_d[n], slineLen_d[n], sline_d[n]);
             break;
@@ -2394,3 +2388,4 @@ void write_trk(const int num_threads,
         return;
 }
 #endif
+#endif // __NVRTC__

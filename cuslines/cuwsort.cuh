@@ -79,12 +79,15 @@ int swap4[3][4] = {{ 2,  3,  0,  1},
 __device__ __constant__
 int swap2[1][2] = {{ 1,  0}};
 
-__device__ __constant__ const int *__swaps[] = {NULL,
-						reinterpret_cast<const int *>(&swap2[0][0]),
-						reinterpret_cast<const int *>(&swap4[0][0]),
-						reinterpret_cast<const int *>(&swap8[0][0]),
-						reinterpret_cast<const int *>(&swap16[0][0]),
-						reinterpret_cast<const int *>(&swap32[0][0])};
+template<int GSIZE>
+__device__ __forceinline__ const int* get_swap_ptr() {
+    if constexpr (GSIZE == 2)  return (const int*)swap2;
+    else if constexpr (GSIZE == 4)  return (const int*)swap4;
+    else if constexpr (GSIZE == 8)  return (const int*)swap8;
+    else if constexpr (GSIZE == 16) return (const int*)swap16;
+    else if constexpr (GSIZE == 32) return (const int*)swap32;
+    else return nullptr;
+}
 
 template<int X>
 struct STATIC_LOG2 {
@@ -113,7 +116,7 @@ __device__  KEY_T warp_sort(KEY_T v) {
 
 	const int gid = lid % GSIZE;
 
-	const int (*swap)[GSIZE] = reinterpret_cast<const int (*)[GSIZE]>(__swaps[LOG2_GSIZE]);
+	const int (*swap)[GSIZE] = reinterpret_cast<const int (*)[GSIZE]>(get_swap_ptr<GSIZE>());
 
         #pragma unroll
         for(int i = 0; i < NSWAP; i++) {
@@ -140,7 +143,7 @@ __device__  void warp_sort(KEY_T *__restrict__ k, VAL_T *__restrict__ v) {
 	
 	const int gid = lid % GSIZE;
 
-	const int (*swap)[GSIZE] = reinterpret_cast<const int (*)[GSIZE]>(__swaps[LOG2_GSIZE]);
+	const int (*swap)[GSIZE] = reinterpret_cast<const int (*)[GSIZE]>(get_swap_ptr<GSIZE>());
 
         #pragma unroll
         for(int i = 0; i < NSWAP; i++) {

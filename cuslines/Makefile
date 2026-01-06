@@ -31,14 +31,14 @@ CUDACC=$(CUDA_HOME)/bin/nvcc # -G -g -dopt=on
 CXX=g++
 LD=g++
 
-CXXFLAGS= -c -O3 -std=c++11 -fopenmp -fPIC `python3 -m pybind11 --includes` -I$(CUDA_HOME)/include
+CXXFLAGS= -c -O3 -std=c++17 -fopenmp -fPIC `python3 -m pybind11 --includes` -I$(CUDA_HOME)/include
 
-SMS ?= 70
+SMS ?= 75 80
 CUDA_ARCH = $(foreach SM,$(SMS),-gencode arch=compute_$(SM),code=sm_$(SM))
 LASTSM := $(lastword $(sort $(SMS)))
 CUDA_ARCH += -gencode arch=compute_$(LASTSM),code=compute_$(LASTSM)
 
-COMMON_FLAGS = -c -std=c++11 -Xcompiler -fPIC --use_fast_math -Xcompiler=-fopenmp $(CUDA_ARCH)
+COMMON_FLAGS = -c -std=c++17 -Xcompiler -fPIC --use_fast_math -Xcompiler=-fopenmp $(CUDA_ARCH)
 RELEASE_FLAGS = -O3 -Xptxas=-O3
 DEBUG_FLAGS   = -O0 -Xptxas=-v -g -G -lineinfo
 CUDACFLAGS = $(COMMON_FLAGS) $(RELEASE_FLAGS)

@@ -1,25 +1,26 @@
 from cuda.bindings import driver, runtime
+from cuda.bindings.runtime import cudaMemcpyKind
+import cuda.core as cc
 # TODO: consider cuda core over cuda bindings
 
 import numpy as np
 import logging
 
-from cutils import (
+from cuslines.cuda_python.cutils import (
     REAL_SIZE,
     REAL_DTYPE,
     checkCudaErrors,
 )
-from cu_direction_getters import (
+from cuslines.cuda_python.cu_direction_getters import (
     GPUDirectionGetter,
     BootDirectionGetter
 )
-from cu_propagate_seeds import SeedBatchPropagator
+from cuslines.cuda_python.cu_propagate_seeds import SeedBatchPropagator
 
 
 logger = logging.getLogger("GPUStreamlines")
 
-# TODO: we need to organize this package into folders, then make it pip installable.
-# but should merge in PTT FIRST
+
 class GPUTracker:  # TODO: bring in pyAFQ prep stuff
     def __init__(
         self,
@@ -37,21 +38,10 @@ class GPUTracker:  # TODO: bring in pyAFQ prep stuff
         rng_seed: int = 0,
         rng_offset: int = 0,
     ):
-        for name, arr, dt in [
-            ("dataf", dataf, REAL_DTYPE),
-            ("metric_map", metric_map, REAL_DTYPE),
-            ("sphere_vertices", sphere_vertices, REAL_DTYPE),
-            ("sphere_edges", sphere_edges, np.int32),
-        ]:
-            if arr.dtype != dt:
-                raise TypeError(f"{name} must have dtype {dt}, got {arr.dtype}")
-            if not arr.flags.c_contiguous:
-                raise ValueError(f"{name} must be C-contiguous")
-
-        self.dataf = dataf
-        self.metric_map = metric_map
-        self.sphere_vertices = sphere_vertices
-        self.sphere_edges = sphere_edges
+        self.dataf = np.ascontiguousarray(dataf, dtype=REAL_DTYPE)
+        self.metric_map = np.ascontiguousarray(metric_map, dtype=REAL_DTYPE)
+        self.sphere_vertices = np.ascontiguousarray(sphere_vertices, dtype=REAL_DTYPE)
+        self.sphere_edges = np.ascontiguousarray(sphere_edges, dtype=np.int32)
 
         self.dimx, self.dimy, self.dimz, self.dimt = dataf.shape
         self.nedges = int(sphere_edges.shape[0])
@@ -59,6 +49,7 @@ class GPUTracker:  # TODO: bring in pyAFQ prep stuff
             self.samplm_nr = int(dg.sampling_matrix.shape[0])
         else:
             self.samplm_nr = self.dimt
+        self.n32dimt = ((self.dimt + 31) // 32) * 32
 
         self.dg = dg
         self.max_angle = REAL_DTYPE(max_angle)
@@ -83,6 +74,9 @@ class GPUTracker:  # TODO: bring in pyAFQ prep stuff
         self.sphere_vertices_d = []
         self.sphere_edges_d = []
 
+        self.streams = []
+        self.managed_data = []
+
         self.seed_propagator = SeedBatchPropagator(
             gpu_tracker=self)
         self._allocated = False
@@ -97,15 +91,22 @@ class GPUTracker:  # TODO: bring in pyAFQ prep stuff
 
         for ii in range(self.ngpus):
             checkCudaErrors(runtime.cudaSetDevice(ii))
-            self.dataf_d.append( # TODO: put this in texture memory?
-                checkCudaErrors(runtime.cudaMallocManaged(  # TODO: look at cuda core managed memory
-                    REAL_SIZE*self.dataf.size, 
-                    runtime.cudaMemAttachGlobal)))
-            checkCudaErrors(runtime.cudaMemAdvise(
-                self.dataf_d[ii],
-                REAL_SIZE*self.dataf.size,
-                runtime.cudaMemAdviseSetPreferredLocation,
-                ii))
+            self.streams.append(
+                checkCudaErrors(runtime.cudaStreamCreateWithFlags(
+                    runtime.cudaStreamNonBlocking)))
+
+        for ii in range(self.ngpus):
+            checkCudaErrors(runtime.cudaSetDevice(ii))
+
+            # TODO: put this in texture memory?
+            self.managed_data.append(
+                cc.ManagedMemoryResource(
+                    options=cc.ManagedMemoryResourceOptions(preferred_location=ii)
+                )
+            )
+            self.dataf_d.append( 
+                self.managed_data[ii].allocate(
+                    REAL_SIZE*self.dataf.size))
             self.metric_map_d.append(
                 checkCudaErrors(runtime.cudaMalloc(
                     REAL_SIZE*self.metric_map.size)))
@@ -115,36 +116,31 @@ class GPUTracker:  # TODO: bring in pyAFQ prep stuff
             self.sphere_edges_d.append(
                 checkCudaErrors(runtime.cudaMalloc(
                     np.int32().nbytes*self.sphere_edges.size)))
-            
+
+            logger.info("here-1")
             checkCudaErrors(runtime.cudaMemcpy(
-                self.dataf_d[ii],
+                self.dataf_d[ii].handle,
                 self.dataf.ctypes.data,
                 REAL_SIZE*self.dataf.size,
-                runtime.cudaMemcpyHostToDevice))
+                cudaMemcpyKind.cudaMemcpyHostToDevice))
+            logger.info("here0")
             checkCudaErrors(runtime.cudaMemcpy(
                 self.metric_map_d[ii],
                 self.metric_map.ctypes.data,
                 REAL_SIZE*self.metric_map.size,
-                runtime.cudaMemcpyHostToDevice))
+                cudaMemcpyKind.cudaMemcpyHostToDevice))
             checkCudaErrors(runtime.cudaMemcpy(
                 self.sphere_vertices_d[ii],
                 self.sphere_vertices.ctypes.data,
                 REAL_SIZE*self.sphere_vertices.size,
-                runtime.cudaMemcpyHostToDevice))
+                cudaMemcpyKind.cudaMemcpyHostToDevice))
             checkCudaErrors(runtime.cudaMemcpy(
                 self.sphere_edges_d[ii],
                 self.sphere_edges.ctypes.data,
                 np.int32().nbytes*self.sphere_edges.size,
-                runtime.cudaMemcpyHostToDevice))
-            
+                cudaMemcpyKind.cudaMemcpyHostToDevice))
+            logger.info("here0,5")
             self.dg.allocate_on_gpu(ii)
-
-        self.streams = []
-        for ii in range(self.ngpus):
-            checkCudaErrors(runtime.cudaSetDevice(ii))
-            self.streams.append(
-                checkCudaErrors(runtime.cudaStreamCreateWithFlags(
-                    runtime.cudaStreamNonBlocking)))
 
         self._allocated = True
 
@@ -153,22 +149,17 @@ class GPUTracker:  # TODO: bring in pyAFQ prep stuff
 
         for n in range(self.ngpus):
             checkCudaErrors(runtime.cudaSetDevice(n))
-            if self.dataf_d[n]:
-                checkCudaErrors(runtime.cudaFree(self.dataf_d[n]))
+            # if self.dataf_d[n]: # TODO: find how to do this
+            #     self.managed_data[n].deallocate(
+            #         self.dataf_d[n],
+            #         REAL_SIZE*self.dataf.size)
+            #     self.managed_data[n].close()
             if self.metric_map_d[n]:
                 checkCudaErrors(runtime.cudaFree(self.metric_map_d[n]))
             if self.sphere_vertices_d[n]:
                 checkCudaErrors(runtime.cudaFree(self.sphere_vertices_d[n]))
             if self.sphere_edges_d[n]:
                 checkCudaErrors(runtime.cudaFree(self.sphere_edges_d[n]))
-
-            if self.seed_propagator.sline_lens[n]:
-                checkCudaErrors(runtime.cudaFreeHost(
-                    self.seed_propagator.sline_lens[n]))
-            if self.seed_propagator.slines[n]:
-                checkCudaErrors(runtime.cudaFreeHost(
-                    self.seed_propagator.slines[n]))
-                
             self.dg.deallocate_on_gpu(n)
 
             checkCudaErrors(runtime.cudaStreamDestroy(self.streams[n]))

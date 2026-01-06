@@ -40,7 +40,7 @@
 #define FLOOR		floorf
 #define LOG		__logf
 #define EXP		__expf
-#define REAL_MAX	(FLT_MAX)
+#define REAL_MAX	__int_as_float(0x7f7fffffU)
 #define REAL_MIN	(-REAL_MAX)
 #define COS		__cosf
 #define SIN		__sinf
@@ -58,7 +58,7 @@
 #define FLOOR		floor
 #define LOG		log
 #define EXP		exp
-#define REAL_MAX	(DBL_MAX)
+#define REAL_MAX	__longlong_as_double(0x7fefffffffffffffLL)
 #define REAL_MIN	(-REAL_MAX)
 #define COS		cos
 #define SIN		sin
@@ -96,6 +96,35 @@ enum ModelType {
   CSA = 1,
   PROB = 2,
   PTT = 3,
+};
+
+struct NoCtx {};
+
+template<typename REAL_T>
+struct BootCtx {
+    REAL_T min_signal;
+    int delta_nr;
+    const REAL_T* H;
+    const REAL_T* R;
+    const REAL_T* delta_b;
+    const REAL_T* delta_q;
+    const REAL_T* sampling_matrix;
+    const int* b0s_mask;
+};
+
+template<ModelType M, typename REAL_T>
+struct ModelCtx {
+    using type = NoCtx;
+};
+
+template<typename REAL_T>
+struct ModelCtx<CSA, REAL_T> {
+    using type = BootCtx<REAL_T>;
+};
+
+template<typename REAL_T>
+struct ModelCtx<OPDT, REAL_T> {
+    using type = BootCtx<REAL_T>;
 };
 
 #endif
