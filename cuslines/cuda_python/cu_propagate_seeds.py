@@ -3,7 +3,7 @@ import gc
 from cuda.bindings import runtime
 from cuda.bindings.runtime import cudaMemcpyKind
 
-from nibabel.streamlines.array_sequence import ArraySequence
+from nibabel.streamlines.array_sequence import ArraySequence, MEGABYTE
 import logging
 
 from cuslines.cuda_python.cutils import (
@@ -16,8 +16,7 @@ from cuslines.cuda_python.cutils import (
     THR_X_BL,
     DEV_PTR,
     div_up,
-    checkCudaErrors,
-)
+    checkCudaErrors)
 
 
 logger = logging.getLogger("GPUStreamlines")
@@ -53,7 +52,7 @@ class SeedBatchPropagator:
         return nseeds_gpu, block, grid
 
     def _get_sl_buffer_size(self, n):
-        return REAL_SIZE*2*3*MAX_SLINE_LEN*self.nSlines[n]
+        return REAL_SIZE*2*3*MAX_SLINE_LEN*self.nSlines[n].astype(np.int64)
 
     def _allocate_seed_memory(self, seeds):
         # Move seeds to GPU
@@ -79,7 +78,7 @@ class SeedBatchPropagator:
             self.shDirTemp0_d[ii] = checkCudaErrors(runtime.cudaMalloc(
                 REAL3_DTYPE.itemsize * self.gpu_tracker.samplm_nr * grid[0] * block[1]))
 
-    def _cumsum_offsets(self):  # TODO: do this on device?
+    def _cumsum_offsets(self):  # TODO: do this on device? not crucial for performance now
         for ii in range(self.ngpus):
             nseeds_gpu, _, _ = self._switch_device(ii)
             if (nseeds_gpu == 0):
@@ -93,14 +92,18 @@ class SeedBatchPropagator:
                 slinesOffs_h.nbytes,
                 cudaMemcpyKind.cudaMemcpyDeviceToHost))
 
-            slinesOffs_h = np.concatenate((
-                [0], np.cumsum(slinesOffs_h[:-1], dtype=slinesOffs_h.dtype)))
-            self.nSlines[ii] = int(slinesOffs_h[-1])
+            __pval = slinesOffs_h[0]
+            slinesOffs_h[0] = 0
+            for jj in range(1, nseeds_gpu + 1):
+                __cval = slinesOffs_h[jj]
+                slinesOffs_h[jj] = slinesOffs_h[jj - 1] + __pval
+                __pval = __cval
+            self.nSlines[ii] = int(slinesOffs_h[nseeds_gpu])
 
             checkCudaErrors(runtime.cudaMemcpy(
                 self.slinesOffs_d[ii],
                 slinesOffs_h.ctypes.data,
-                self.slinesOffs_d.size * (nseeds_gpu + 1),
+                slinesOffs_h.nbytes,
                 cudaMemcpyKind.cudaMemcpyHostToDevice))
 
     def _allocate_tracking_memory(self):
@@ -167,10 +170,10 @@ class SeedBatchPropagator:
             checkCudaErrors(runtime.cudaFree(self.slineLen_d[ii]))
             checkCudaErrors(runtime.cudaFree(self.sline_d[ii]))
 
-        self.nSlines_old = self.nSlines.copy()
+        self.nSlines_old = self.nSlines
         self.gpu_tracker.rng_offset += self.nseeds
 
-    def propagate(self, seeds):
+    def propagate(self, seeds): # TODO: better queuing/batching of seeds, if more performance needed
         self.nseeds = len(seeds)
         self.nseeds_per_gpu = (self.nseeds + self.gpu_tracker.ngpus - 1) // self.gpu_tracker.ngpus
 
@@ -181,6 +184,9 @@ class SeedBatchPropagator:
             if (nseeds_gpu == 0):
                 continue
             self.gpu_tracker.dg.getNumStreamlines(ii, nseeds_gpu, block, grid, self)
+        for ii in range(self.ngpus):
+            checkCudaErrors(runtime.cudaStreamSynchronize(
+                self.gpu_tracker.streams[ii]))
 
         self._cumsum_offsets()
         self._allocate_tracking_memory()
@@ -190,6 +196,9 @@ class SeedBatchPropagator:
             if (nseeds_gpu == 0):
                 continue
             self.gpu_tracker.dg.generateStreamlines(ii, nseeds_gpu, block, grid, self)
+        for ii in range(self.ngpus):
+            checkCudaErrors(runtime.cudaStreamSynchronize(
+                self.gpu_tracker.streams[ii]))
 
         self._cleanup()
 
@@ -212,7 +221,7 @@ class SeedBatchPropagator:
                         this_sls[jj],
                         dtype=REAL_DTYPE)[:npts]
 
-        return ArraySequence(_yield_slines(), buffer_size)
+        return ArraySequence(_yield_slines(), buffer_size // MEGABYTE)
 
     def to_trx():
         raise NotImplementedError("Export to TRX not yet implemented")

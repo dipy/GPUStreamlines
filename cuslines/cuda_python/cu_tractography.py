@@ -98,15 +98,9 @@ class GPUTracker:  # TODO: bring in pyAFQ prep stuff
         for ii in range(self.ngpus):
             checkCudaErrors(runtime.cudaSetDevice(ii))
 
-            # TODO: put this in texture memory?
-            self.managed_data.append(
-                cc.ManagedMemoryResource(
-                    options=cc.ManagedMemoryResourceOptions(preferred_location=ii)
-                )
-            )
-            self.dataf_d.append( 
-                self.managed_data[ii].allocate(
-                    REAL_SIZE*self.dataf.size))
+            self.dataf_d.append(
+                checkCudaErrors(runtime.cudaMalloc(
+                    REAL_SIZE*self.dataf.size)))
             self.metric_map_d.append(
                 checkCudaErrors(runtime.cudaMalloc(
                     REAL_SIZE*self.metric_map.size)))
@@ -117,13 +111,11 @@ class GPUTracker:  # TODO: bring in pyAFQ prep stuff
                 checkCudaErrors(runtime.cudaMalloc(
                     np.int32().nbytes*self.sphere_edges.size)))
 
-            logger.info("here-1")
             checkCudaErrors(runtime.cudaMemcpy(
-                self.dataf_d[ii].handle,
+                self.dataf_d[ii],
                 self.dataf.ctypes.data,
                 REAL_SIZE*self.dataf.size,
                 cudaMemcpyKind.cudaMemcpyHostToDevice))
-            logger.info("here0")
             checkCudaErrors(runtime.cudaMemcpy(
                 self.metric_map_d[ii],
                 self.metric_map.ctypes.data,
@@ -139,7 +131,6 @@ class GPUTracker:  # TODO: bring in pyAFQ prep stuff
                 self.sphere_edges.ctypes.data,
                 np.int32().nbytes*self.sphere_edges.size,
                 cudaMemcpyKind.cudaMemcpyHostToDevice))
-            logger.info("here0,5")
             self.dg.allocate_on_gpu(ii)
 
         self._allocated = True
@@ -149,11 +140,8 @@ class GPUTracker:  # TODO: bring in pyAFQ prep stuff
 
         for n in range(self.ngpus):
             checkCudaErrors(runtime.cudaSetDevice(n))
-            # if self.dataf_d[n]: # TODO: find how to do this
-            #     self.managed_data[n].deallocate(
-            #         self.dataf_d[n],
-            #         REAL_SIZE*self.dataf.size)
-            #     self.managed_data[n].close()
+            if self.dataf_d[n]:
+                checkCudaErrors(runtime.cudaFree(self.dataf_d[n]))
             if self.metric_map_d[n]:
                 checkCudaErrors(runtime.cudaFree(self.metric_map_d[n]))
             if self.sphere_vertices_d[n]:

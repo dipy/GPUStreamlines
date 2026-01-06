@@ -68,7 +68,7 @@
 #define ACOS		acos
 
 #endif
-
+// TODO: half this in when WMGMI seeding
 #define MAX_SLINE_LEN	(501)
 #define PMF_THRESHOLD_P	((REAL)0.05)
 
