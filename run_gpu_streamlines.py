@@ -72,7 +72,7 @@ random.seed(0)
 #Get Gradient values
 def get_gtab(fbval, fbvec):
     bvals, bvecs = read_bvals_bvecs(fbval, fbvec)
-    gtab = gradient_table(bvals, bvecs)
+    gtab = gradient_table(bvals=bvals, bvecs=bvecs)
     return gtab
 
 def get_img(ep2_seq):
@@ -115,7 +115,8 @@ if 'hardi' in [args.nifti_file, args.bvals, args.bvecs, args.mask_nifti, args.ro
   if not all(arg == 'hardi' for arg in [args.nifti_file, args.bvals, args.bvecs, args.mask_nifti, args.roi_nifti]):
     raise ValueError("If any of the arguments is 'hardi', all must be 'hardi'")
   # Get Stanford HARDI data
-  hardi_nifti_fname, hardi_bval_fname, hardi_bvec_fname = get_fnames('stanford_hardi')
+  hardi_nifti_fname, hardi_bval_fname, hardi_bvec_fname = get_fnames(
+     name='stanford_hardi')
   csf, gm, wm = read_stanford_pve_maps()
   wm_data = wm.get_fdata()
 
@@ -139,7 +140,7 @@ else:
 
 tenmodel = dti.TensorModel(gtab, fit_method='WLS')
 print('Fitting Tensor')
-tenfit = tenmodel.fit(data, mask)
+tenfit = tenmodel.fit(data, mask=mask)
 print('Computing anisotropy measures (FA,MD,RGB)')
 FA = tenfit.fa
 
@@ -220,6 +221,7 @@ if args.device == "cpu":
     ts = time.time()
     streamline_generator = LocalTracking(dg, tissue_classifier, seed_mask, affine=np.eye(4), step_size=args.step_size)
     sft = StatefulTractogram(streamline_generator, img, Space.VOX)
+    n_sls = len(sft.streamlines)
     te = time.time()
 else:
     with GPUTracker(
@@ -240,10 +242,12 @@ else:
         ts = time.time()
         if args.output_prefix and write_method == "trx":
             trx_file = gpu_tracker.generate_trx(seed_mask, img)
+            n_sls = len(trx_file.streamlines)
         else:
             sft = gpu_tracker.generate_sft(seed_mask, img)
+            n_sls = len(sft.streamlines)
         te = time.time()
-print("Generated {} streamlines from {} seeds, time: {} s".format(len(sft.streamlines),
+print("Generated {} streamlines from {} seeds, time: {} s".format(n_sls,
                                                                   seed_mask.shape[0],
                                                                   te-ts))
 

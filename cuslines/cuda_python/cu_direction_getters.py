@@ -1,6 +1,5 @@
 import numpy as np
 from abc import ABC, abstractmethod
-import ctypes
 import logging
 from importlib.resources import files
 from time import time
@@ -10,7 +9,7 @@ from dipy.reconst import shm
 from cuda.core import Device, LaunchConfig, Program, launch, ProgramOptions
 from cuda.pathfinder import find_nvidia_header_directory
 from cuda.cccl import get_include_paths
-from cuda.bindings import runtime
+from cuda.bindings import runtime, driver
 from cuda.bindings.runtime import cudaMemcpyKind
 
 from cuslines.cuda_python.cutils import (
@@ -22,7 +21,6 @@ from cuslines.cuda_python.cutils import (
     ModelType,
     THR_X_SL,
     BLOCK_Y,
-    REAL_DTYPE_AS_CTYPE,
 )
 
 logger = logging.getLogger("GPUStreamlines")
@@ -47,7 +45,7 @@ class GPUDirectionGetter(ABC):
         start_time = time()
         logger.info("Compiling GPUStreamlines")
 
-        cuslines_cuda = files("cuslines")
+        cuslines_cuda = files("cuslines").joinpath("cuda_c")
 
         if debug:
             program_opts = {
@@ -78,7 +76,7 @@ class GPUDirectionGetter(ABC):
         # I think this is reasonable
         dev = Device()
         dev.set_current()
-        cuda_path = cuslines_cuda.joinpath("cuda_c/generate_streamlines_cuda.cu")
+        cuda_path = cuslines_cuda.joinpath("generate_streamlines_cuda.cu")
         with open(cuda_path, "r") as f:
             prog = Program(f.read(), code_type="c++", options=program_options)
         self.module = prog.compile(
@@ -88,18 +86,6 @@ class GPUDirectionGetter(ABC):
                 self.genstreamlines_kernel_name,
             ))
         logger.info("GPUStreamlines compiled successfully in %.2f seconds", time() - start_time)
-
-
-class _BootCtx(ctypes.Structure):
-    _fields_ = [
-        ("min_signal", REAL_DTYPE_AS_CTYPE),
-        ("delta_nr", ctypes.c_int32),
-        ("H", ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
-        ("R", ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
-        ("delta_b", ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
-        ("delta_q", ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
-        ("sampling_matrix", ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
-        ("b0s_mask", ctypes.POINTER(ctypes.c_int32))]
 
 
 class BootDirectionGetter(GPUDirectionGetter):
@@ -120,6 +106,8 @@ class BootDirectionGetter(GPUDirectionGetter):
         else:
             raise ValueError(f"Invalid model_type {model_type}, must be one of 'OPDT', 'CSA'")
 
+        checkCudaErrors(driver.cuInit(0))
+
         self.H = np.ascontiguousarray(H, dtype=REAL_DTYPE)
         self.R = np.ascontiguousarray(R, dtype=REAL_DTYPE)
         self.delta_b = np.ascontiguousarray(delta_b, dtype=REAL_DTYPE)
@@ -128,7 +116,6 @@ class BootDirectionGetter(GPUDirectionGetter):
         self.min_signal = REAL_DTYPE(min_signal)
         self.sampling_matrix = np.ascontiguousarray(sampling_matrix, dtype=REAL_DTYPE)
         self.b0s_mask = np.ascontiguousarray(b0s_mask, dtype=np.int32)
-        self.ctx_h = []
 
         self.H_d = []
         self.R_d = []
@@ -136,10 +123,9 @@ class BootDirectionGetter(GPUDirectionGetter):
         self.delta_q_d = []
         self.b0s_mask_d = []
         self.sampling_matrix_d = []
-        self.ctx_d = []
 
         self.getnum_kernel_name = f"getNumStreamlinesBoot_k<{THR_X_SL},{BLOCK_Y},{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
-        self.genstreamlines_kernel_name = f"genStreamlinesMerge_k<{THR_X_SL},{BLOCK_Y},{model_type.upper()},{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
+        self.genstreamlines_kernel_name = f"genStreamlinesMergeBoot_k<{THR_X_SL},{BLOCK_Y},{model_type.upper()},{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
         self.compile_program()
 
     @classmethod
@@ -232,19 +218,6 @@ class BootDirectionGetter(GPUDirectionGetter):
         self.sampling_matrix_d.append(
             checkCudaErrors(runtime.cudaMalloc(
                 REAL_SIZE*self.sampling_matrix.size)))
-        self.ctx_d.append(
-            checkCudaErrors(runtime.cudaMalloc(
-                ctypes.sizeof(_BootCtx))))
-        self.ctx_h.append(_BootCtx(
-            min_signal=self.min_signal,
-            delta_nr=self.delta_nr,
-            H=ctypes.cast(self.H_d[n], ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
-            R=ctypes.cast(self.R_d[n], ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
-            delta_b=ctypes.cast(self.delta_b_d[n], ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
-            delta_q=ctypes.cast(self.delta_q_d[n], ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
-            sampling_matrix=ctypes.cast(self.sampling_matrix_d[n], ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
-            b0s_mask=ctypes.cast(self.b0s_mask_d[n], ctypes.POINTER(ctypes.c_int32))
-        ))
 
         checkCudaErrors(runtime.cudaMemcpy(
             self.H_d[n],
@@ -276,11 +249,6 @@ class BootDirectionGetter(GPUDirectionGetter):
             self.sampling_matrix.ctypes.data,
             REAL_SIZE*self.sampling_matrix.size,
             cudaMemcpyKind.cudaMemcpyHostToDevice))
-        checkCudaErrors(runtime.cudaMemcpy(
-            self.ctx_d[n],
-            ctypes.addressof(self.ctx_h[n]),
-            ctypes.sizeof(_BootCtx),
-            cudaMemcpyKind.cudaMemcpyHostToDevice))
 
     def deallocate_on_gpu(self, n):
         if self.H_d[n]:
@@ -295,8 +263,6 @@ class BootDirectionGetter(GPUDirectionGetter):
             checkCudaErrors(runtime.cudaFree(self.b0s_mask_d[n]))
         if self.sampling_matrix_d[n]:
             checkCudaErrors(runtime.cudaFree(self.sampling_matrix_d[n]))
-        if self.ctx_d[n]:
-            checkCudaErrors(runtime.cudaFree(self.ctx_d[n]))
 
     def _shared_mem_bytes(self, sp):
         return REAL_SIZE*BLOCK_Y*2*(
@@ -312,8 +278,9 @@ class BootDirectionGetter(GPUDirectionGetter):
             sp.gpu_tracker.streams[n], config, ker,
             self.model_type,
             sp.gpu_tracker.max_angle,
-            sp.gpu_tracker.min_separation_angle,
+            self.min_signal,
             sp.gpu_tracker.relative_peak_thresh,
+            sp.gpu_tracker.min_separation_angle,
             sp.gpu_tracker.rng_seed,
             nseeds_gpu,
             sp.seeds_d[n],
@@ -358,11 +325,18 @@ class BootDirectionGetter(GPUDirectionGetter):
             sp.gpu_tracker.dimt,
             sp.gpu_tracker.dataf_d[n],
             sp.gpu_tracker.metric_map_d[n],
-            self.ctx_d[n],
             sp.gpu_tracker.samplm_nr,
             sp.gpu_tracker.sphere_vertices_d[n],
             sp.gpu_tracker.sphere_edges_d[n],
             sp.gpu_tracker.nedges,
+            self.min_signal,
+            self.delta_nr,
+            self.H_d[n],
+            self.R_d[n],
+            self.delta_b_d[n],
+            self.delta_q_d[n],
+            self.sampling_matrix_d[n],
+            self.b0s_mask_d[n],
             sp.slinesOffs_d[n],
             sp.shDirTemp0_d[n],
             sp.slineSeed_d[n],
@@ -373,8 +347,9 @@ class BootDirectionGetter(GPUDirectionGetter):
 
 class ProbDirectionGetter(GPUDirectionGetter):
     def __init__(self):
+        checkCudaErrors(driver.cuInit(0))
         self.getnum_kernel_name = f"getNumStreamlinesProb_k<{THR_X_SL},{BLOCK_Y},{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
-        self.genstreamlines_kernel_name = f"genStreamlinesMerge_k<{THR_X_SL},{BLOCK_Y},PROB,{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
+        self.genstreamlines_kernel_name = f"genStreamlinesMergeProb_k<{THR_X_SL},{BLOCK_Y},PROB,{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
         self.compile_program()
 
     def getNumStreamlines(self, n, nseeds_gpu, block, grid, sp):
@@ -427,7 +402,6 @@ class ProbDirectionGetter(GPUDirectionGetter):
             sp.gpu_tracker.dimt,
             sp.gpu_tracker.dataf_d[n],
             sp.gpu_tracker.metric_map_d[n],
-            int(0),
             sp.gpu_tracker.samplm_nr,
             sp.gpu_tracker.sphere_vertices_d[n],
             sp.gpu_tracker.sphere_edges_d[n],
@@ -440,11 +414,11 @@ class ProbDirectionGetter(GPUDirectionGetter):
         )
 
 
-
 class PttDirectionGetter(ProbDirectionGetter):
     def __init__(self):
+        checkCudaErrors(driver.cuInit(0))
         self.getnum_kernel_name = f"getNumStreamlinesProb_k<{THR_X_SL},{BLOCK_Y},{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
-        self.genstreamlines_kernel_name = f"genStreamlinesMerge_k<{THR_X_SL},{BLOCK_Y},PTT,{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
+        self.genstreamlines_kernel_name = f"genStreamlinesMergeProb_k<{THR_X_SL},{BLOCK_Y},PTT,{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
         self.compile_program()
 
     def _shared_mem_bytes(self, sp):

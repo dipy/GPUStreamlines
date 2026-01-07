@@ -1,4 +1,4 @@
-from cuda.bindings import driver, runtime
+from cuda.bindings import runtime
 from cuda.bindings.runtime import cudaMemcpyKind
 # TODO: consider cuda core over cuda bindings
 
@@ -116,7 +116,6 @@ class GPUTracker:
         self.rng_offset = int(rng_offset)
         self.chunk_size = int(chunk_size)
 
-        checkCudaErrors(driver.cuInit(0))
         avail = checkCudaErrors(runtime.cudaGetDeviceCount())
         if self.ngpus > avail:
             raise RuntimeError(f"Requested {self.ngpus} GPUs but only {avail} available")

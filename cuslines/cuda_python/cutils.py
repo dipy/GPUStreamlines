@@ -1,7 +1,6 @@
 from cuda.bindings import driver, nvrtc
 
 import numpy as np
-import ctypes
 
 from enum import IntEnum
 
@@ -22,7 +21,6 @@ if REAL_SIZE == 4:
                             ('z', np.float32)], align=True)
     REAL_DTYPE_AS_STR = "float"
     REAL3_DTYPE_AS_STR = "float3"
-    REAL_DTYPE_AS_CTYPE = ctypes.c_float
 elif REAL_SIZE == 8:
     REAL_DTYPE = np.float64
     REAL3_DTYPE = np.dtype([('x', np.float64),
@@ -30,7 +28,6 @@ elif REAL_SIZE == 8:
                             ('z', np.float64)], align=True)
     REAL_DTYPE_AS_STR = "double"
     REAL3_DTYPE_AS_STR = "double3"
-    REAL_DTYPE_AS_CTYPE = ctypes.c_double
 else:
     raise NotImplementedError(f"Unsupported REAL_SIZE={REAL_SIZE} in globals.h")
 BLOCK_Y = THR_X_BL//THR_X_SL

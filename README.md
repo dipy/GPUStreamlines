@@ -48,7 +48,7 @@ Destroy GPUTracker...
 
 Note that if you experience memory errors, you can adjust the `--chunk-size` flag.
 
-To run on more seeds, we suggest enabling the `--trx` flag in the GPU script to not get bottlenecked by writing files.
+To run on more seeds, we suggest setting the `--write-method trx` flag in the GPU script to not get bottlenecked by writing files.
 
 ## Running on AWS with Docker
 First, set up an AWS instance with GPU and ssh into it (we recommend a P3 instance with at least 1 V100 16 GB GPU and a Deep Learning AMI Ubuntu 18.04 v 33.0.). Then do the following:

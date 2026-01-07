@@ -98,33 +98,6 @@ enum ModelType {
   PTT = 3,
 };
 
-struct NoCtx {};
-
-template<typename REAL_T>
-struct BootCtx {
-    REAL_T min_signal;
-    int delta_nr;
-    const REAL_T* H;
-    const REAL_T* R;
-    const REAL_T* delta_b;
-    const REAL_T* delta_q;
-    const REAL_T* sampling_matrix;
-    const int* b0s_mask;
-};
-
-template<ModelType M, typename REAL_T>
-struct ModelCtx {
-    using type = NoCtx;
-};
-
-template<typename REAL_T>
-struct ModelCtx<CSA, REAL_T> {
-    using type = BootCtx<REAL_T>;
-};
-
-template<typename REAL_T>
-struct ModelCtx<OPDT, REAL_T> {
-    using type = BootCtx<REAL_T>;
-};
+enum {OUTSIDEIMAGE, INVALIDPOINT, TRACKPOINT, ENDPOINT};
 
 #endif
