@@ -196,20 +196,20 @@ else:
   model = ConstrainedSphericalDeconvModel(gtab, response, sh_order=args.sh_order)
   fit = model.fit(data, mask=(FA >= args.fa_threshold))
   data = fit.odf(sphere).clip(min=0)
-  if args.model == "ptt":
+  if args.dg == "ptt":
       if args.device == "cpu":
           dg = cpu_PTTDirectionGetter()
       else:
         # Set FOD to 0 outside mask for probing
         data[FA < args.fa_threshold, :] = 0
         dg = PttDirectionGetter()
-  elif args.model == "prob":
+  elif args.dg == "prob":
       if args.device == "cpu":
         dg = cpu_ProbDirectionGetter()
       else:
         dg = ProbDirectionGetter()
   else:
-      raise ValueError("Unknown model type: {}".format(args.model))
+      raise ValueError("Unknown direction getter type: {}".format(args.dg))
 
 # Setup direction getter args
 if args.device == "cpu":
