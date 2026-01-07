@@ -19,7 +19,7 @@ if REAL_SIZE == 4:
     REAL_DTYPE = np.float32
     REAL3_DTYPE = np.dtype([('x', np.float32),
                             ('y', np.float32),
-                            ('z', np.float32)])
+                            ('z', np.float32)], align=True)
     REAL_DTYPE_AS_STR = "float"
     REAL3_DTYPE_AS_STR = "float3"
     REAL_DTYPE_AS_CTYPE = ctypes.c_float
@@ -27,7 +27,7 @@ elif REAL_SIZE == 8:
     REAL_DTYPE = np.float64
     REAL3_DTYPE = np.dtype([('x', np.float64),
                             ('y', np.float64),
-                            ('z', np.float64)])
+                            ('z', np.float64)], align=True)
     REAL_DTYPE_AS_STR = "double"
     REAL3_DTYPE_AS_STR = "double3"
     REAL_DTYPE_AS_CTYPE = ctypes.c_double

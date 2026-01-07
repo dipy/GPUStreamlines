@@ -1,7 +1,7 @@
 import numpy as np
 from abc import ABC, abstractmethod
-import logging
 import ctypes
+import logging
 from importlib.resources import files
 from time import time
 
@@ -18,12 +18,11 @@ from cuslines.cuda_python.cutils import (
     REAL_DTYPE,
     REAL_DTYPE_AS_STR,
     REAL3_DTYPE_AS_STR,
-    REAL_DTYPE_AS_CTYPE,
     checkCudaErrors,
     ModelType,
     THR_X_SL,
     BLOCK_Y,
-    DEV_PTR,
+    REAL_DTYPE_AS_CTYPE,
 )
 
 logger = logging.getLogger("GPUStreamlines")
@@ -95,13 +94,12 @@ class _BootCtx(ctypes.Structure):
     _fields_ = [
         ("min_signal", REAL_DTYPE_AS_CTYPE),
         ("delta_nr", ctypes.c_int32),
-        ("H", ctypes.c_void_p),
-        ("R", ctypes.c_void_p),
-        ("delta_b", ctypes.c_void_p),
-        ("delta_q", ctypes.c_void_p),
-        ("sampling_matrix", ctypes.c_void_p),
-        ("b0s_mask", ctypes.c_void_p),
-    ]
+        ("H", ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
+        ("R", ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
+        ("delta_b", ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
+        ("delta_q", ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
+        ("sampling_matrix", ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
+        ("b0s_mask", ctypes.POINTER(ctypes.c_int32))]
 
 
 class BootDirectionGetter(GPUDirectionGetter):
@@ -239,12 +237,13 @@ class BootDirectionGetter(GPUDirectionGetter):
                 ctypes.sizeof(_BootCtx))))
         self.ctx_h.append(_BootCtx(
             min_signal=self.min_signal,
-            H=self.H_d[n],
-            R=self.R_d[n],
-            delta_b=self.delta_b_d[n],
-            delta_q=self.delta_q_d[n],
-            sampling_matrix=self.sampling_matrix_d[n],
-            b0s_mask=self.b0s_mask_d[n],
+            delta_nr=self.delta_nr,
+            H=ctypes.cast(self.H_d[n], ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
+            R=ctypes.cast(self.R_d[n], ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
+            delta_b=ctypes.cast(self.delta_b_d[n], ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
+            delta_q=ctypes.cast(self.delta_q_d[n], ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
+            sampling_matrix=ctypes.cast(self.sampling_matrix_d[n], ctypes.POINTER(REAL_DTYPE_AS_CTYPE)),
+            b0s_mask=ctypes.cast(self.b0s_mask_d[n], ctypes.POINTER(ctypes.c_int32))
         ))
 
         checkCudaErrors(runtime.cudaMemcpy(
@@ -279,10 +278,9 @@ class BootDirectionGetter(GPUDirectionGetter):
             cudaMemcpyKind.cudaMemcpyHostToDevice))
         checkCudaErrors(runtime.cudaMemcpy(
             self.ctx_d[n],
-            ctypes.byref(self.ctx_h[n]),
+            ctypes.addressof(self.ctx_h[n]),
             ctypes.sizeof(_BootCtx),
-            cudaMemcpyKind.cudaMemcpyHostToDevice
-        ))
+            cudaMemcpyKind.cudaMemcpyHostToDevice))
 
     def deallocate_on_gpu(self, n):
         if self.H_d[n]:
