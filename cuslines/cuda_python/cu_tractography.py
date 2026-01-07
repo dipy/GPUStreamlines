@@ -290,7 +290,7 @@ class GPUTracker:
                     new_offsets_idx > trx_file.header["NB_STREAMLINES"]
                     or new_sls_data_idx > trx_file.header["NB_VERTICES"]
                 ):
-                    print("TRX resizing...")
+                    logger.info("TRX resizing...")
                     trx_file.resize(
                         nb_streamlines=new_offsets_idx * 2,
                         nb_vertices=new_sls_data_idx * 2,
