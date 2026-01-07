@@ -8,8 +8,6 @@ def defines_to_python(src, dst):
     src = Path(src)
     dst = Path(dst)
 
-    defines = {}
-
     INT_DEFINE = re.compile(
         r"#define\s+(\w+)\s+\(?\s*([0-9]+)\s*\)?"
     )
