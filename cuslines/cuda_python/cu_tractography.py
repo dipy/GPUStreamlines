@@ -14,7 +14,7 @@ from cuslines.cuda_python.cutils import (
 )
 from cuslines.cuda_python.cu_direction_getters import (
     GPUDirectionGetter,
-    BootDirectionGetter
+    BootDirectionGetter,
 )
 from cuslines.cuda_python.cu_propagate_seeds import SeedBatchPropagator
 
@@ -31,6 +31,7 @@ logger = logging.getLogger("GPUStreamlines")
 # ACT
 # SCIL streamline reduction onboard GPU
 # Remove small/long streamlines on gpu
+
 
 class GPUTracker:
     def __init__(
@@ -118,7 +119,9 @@ class GPUTracker:
 
         avail = checkCudaErrors(runtime.cudaGetDeviceCount())
         if self.ngpus > avail:
-            raise RuntimeError(f"Requested {self.ngpus} GPUs but only {avail} available")
+            raise RuntimeError(
+                f"Requested {self.ngpus} GPUs but only {avail} available"
+            )
 
         logger.info("Creating GPUTracker with %d GPUs...", self.ngpus)
 
@@ -130,8 +133,7 @@ class GPUTracker:
         self.streams = []
         self.managed_data = []
 
-        self.seed_propagator = SeedBatchPropagator(
-            gpu_tracker=self)
+        self.seed_propagator = SeedBatchPropagator(gpu_tracker=self)
         self._allocated = False
 
     def __enter__(self):
@@ -145,46 +147,64 @@ class GPUTracker:
         for ii in range(self.ngpus):
             checkCudaErrors(runtime.cudaSetDevice(ii))
             self.streams.append(
-                checkCudaErrors(runtime.cudaStreamCreateWithFlags(
-                    runtime.cudaStreamNonBlocking)))
+                checkCudaErrors(
+                    runtime.cudaStreamCreateWithFlags(runtime.cudaStreamNonBlocking)
+                )
+            )
 
         for ii in range(self.ngpus):
             checkCudaErrors(runtime.cudaSetDevice(ii))
 
             # TODO: performance: dataf could be managed or texture memory instead?
             self.dataf_d.append(
-                checkCudaErrors(runtime.cudaMalloc(
-                    REAL_SIZE*self.dataf.size)))
+                checkCudaErrors(runtime.cudaMalloc(REAL_SIZE * self.dataf.size))
+            )
             self.metric_map_d.append(
-                checkCudaErrors(runtime.cudaMalloc(
-                    REAL_SIZE*self.metric_map.size)))
+                checkCudaErrors(runtime.cudaMalloc(REAL_SIZE * self.metric_map.size))
+            )
             self.sphere_vertices_d.append(
-                checkCudaErrors(runtime.cudaMalloc(
-                    REAL_SIZE*self.sphere_vertices.size)))
+                checkCudaErrors(
+                    runtime.cudaMalloc(REAL_SIZE * self.sphere_vertices.size)
+                )
+            )
             self.sphere_edges_d.append(
-                checkCudaErrors(runtime.cudaMalloc(
-                    np.int32().nbytes*self.sphere_edges.size)))
+                checkCudaErrors(
+                    runtime.cudaMalloc(np.int32().nbytes * self.sphere_edges.size)
+                )
+            )
 
-            checkCudaErrors(runtime.cudaMemcpy(
-                self.dataf_d[ii],
-                self.dataf.ctypes.data,
-                REAL_SIZE*self.dataf.size,
-                cudaMemcpyKind.cudaMemcpyHostToDevice))
-            checkCudaErrors(runtime.cudaMemcpy(
-                self.metric_map_d[ii],
-                self.metric_map.ctypes.data,
-                REAL_SIZE*self.metric_map.size,
-                cudaMemcpyKind.cudaMemcpyHostToDevice))
-            checkCudaErrors(runtime.cudaMemcpy(
-                self.sphere_vertices_d[ii],
-                self.sphere_vertices.ctypes.data,
-                REAL_SIZE*self.sphere_vertices.size,
-                cudaMemcpyKind.cudaMemcpyHostToDevice))
-            checkCudaErrors(runtime.cudaMemcpy(
-                self.sphere_edges_d[ii],
-                self.sphere_edges.ctypes.data,
-                np.int32().nbytes*self.sphere_edges.size,
-                cudaMemcpyKind.cudaMemcpyHostToDevice))
+            checkCudaErrors(
+                runtime.cudaMemcpy(
+                    self.dataf_d[ii],
+                    self.dataf.ctypes.data,
+                    REAL_SIZE * self.dataf.size,
+                    cudaMemcpyKind.cudaMemcpyHostToDevice,
+                )
+            )
+            checkCudaErrors(
+                runtime.cudaMemcpy(
+                    self.metric_map_d[ii],
+                    self.metric_map.ctypes.data,
+                    REAL_SIZE * self.metric_map.size,
+                    cudaMemcpyKind.cudaMemcpyHostToDevice,
+                )
+            )
+            checkCudaErrors(
+                runtime.cudaMemcpy(
+                    self.sphere_vertices_d[ii],
+                    self.sphere_vertices.ctypes.data,
+                    REAL_SIZE * self.sphere_vertices.size,
+                    cudaMemcpyKind.cudaMemcpyHostToDevice,
+                )
+            )
+            checkCudaErrors(
+                runtime.cudaMemcpy(
+                    self.sphere_edges_d[ii],
+                    self.sphere_edges.ctypes.data,
+                    np.int32().nbytes * self.sphere_edges.size,
+                    cudaMemcpyKind.cudaMemcpyHostToDevice,
+                )
+            )
             self.dg.allocate_on_gpu(ii)
 
         self._allocated = True
@@ -211,7 +231,7 @@ class GPUTracker:
         global_chunk_sz = self.chunk_size * self.ngpus
         nchunks = (seeds.shape[0] + global_chunk_sz - 1) // global_chunk_sz
         return global_chunk_sz, nchunks
-    
+
     def generate_sft(self, seeds, ref_img):
         global_chunk_sz, nchunks = self._divide_chunks(seeds)
         buffer_size = 0
@@ -228,8 +248,7 @@ class GPUTracker:
                     seeds[idx * global_chunk_sz : (idx + 1) * global_chunk_sz].shape[0]
                 )
         array_sequence = ArraySequence(
-            (item for gen in generators for item in gen),
-            buffer_size // MEGABYTE
+            (item for gen in generators for item in gen), buffer_size // MEGABYTE
         )
         return StatefulTractogram(array_sequence, ref_img, Space.VOX)
 
@@ -259,7 +278,8 @@ class GPUTracker:
                 )
                 tractogram = Tractogram(
                     self.seed_propagator.as_array_sequence(),
-                    affine_to_rasmm=ref_img.affine)
+                    affine_to_rasmm=ref_img.affine,
+                )
                 tractogram.to_world()
                 sls = tractogram.streamlines
 

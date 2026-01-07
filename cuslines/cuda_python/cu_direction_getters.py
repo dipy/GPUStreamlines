@@ -55,9 +55,7 @@ class GPUDirectionGetter(ABC):
                 "lineinfo": True,
             }
         else:
-            program_opts = {
-                "ptxas_options": ["-O3"]
-            }
+            program_opts = {"ptxas_options": ["-O3"]}
 
         program_options = ProgramOptions(
             name="cuslines",
@@ -68,8 +66,10 @@ class GPUDirectionGetter(ABC):
                 str(cuslines_cuda),
                 find_nvidia_header_directory("cudart"),
                 find_nvidia_header_directory("curand"),
-                get_include_paths().libcudacxx],
-            **program_opts)
+                get_include_paths().libcudacxx,
+            ],
+            **program_opts,
+        )
 
         # Here we assume all devices are the same,
         # so we compile once for any current device.
@@ -84,27 +84,33 @@ class GPUDirectionGetter(ABC):
             name_expressions=(
                 self.getnum_kernel_name,
                 self.genstreamlines_kernel_name,
-            ))
-        logger.info("GPUStreamlines compiled successfully in %.2f seconds", time() - start_time)
+            ),
+        )
+        logger.info(
+            "GPUStreamlines compiled successfully in %.2f seconds", time() - start_time
+        )
 
 
 class BootDirectionGetter(GPUDirectionGetter):
     def __init__(
-            self,
-            model_type: str,
-            min_signal: float,
-            H: np.ndarray,
-            R: np.ndarray,
-            delta_b: np.ndarray,
-            delta_q: np.ndarray,
-            sampling_matrix: np.ndarray,
-            b0s_mask: np.ndarray):
+        self,
+        model_type: str,
+        min_signal: float,
+        H: np.ndarray,
+        R: np.ndarray,
+        delta_b: np.ndarray,
+        delta_q: np.ndarray,
+        sampling_matrix: np.ndarray,
+        b0s_mask: np.ndarray,
+    ):
         if model_type.upper() == "OPDT":
             self.model_type = int(ModelType.OPDT)
         elif model_type.upper() == "CSA":
             self.model_type = int(ModelType.CSA)
         else:
-            raise ValueError(f"Invalid model_type {model_type}, must be one of 'OPDT', 'CSA'")
+            raise ValueError(
+                f"Invalid model_type {model_type}, must be one of 'OPDT', 'CSA'"
+            )
 
         checkCudaErrors(driver.cuInit(0))
 
@@ -129,11 +135,15 @@ class BootDirectionGetter(GPUDirectionGetter):
         self.compile_program()
 
     @classmethod
-    def from_dipy_opdt(cls, gtab, sphere,
-                       sh_order_max=6,
-                       full_basis=False,
-                       sh_lambda=0.006,
-                       min_signal=1):
+    def from_dipy_opdt(
+        cls,
+        gtab,
+        sphere,
+        sh_order_max=6,
+        full_basis=False,
+        sh_lambda=0.006,
+        min_signal=1,
+    ):
         sampling_matrix, _, _ = shm.real_sh_descoteaux(
             sh_order_max, sphere.theta, sphere.phi, full_basis=full_basis, legacy=False
         )
@@ -160,15 +170,19 @@ class BootDirectionGetter(GPUDirectionGetter):
             delta_b=delta_b,
             delta_q=delta_q,
             sampling_matrix=sampling_matrix,
-            b0s_mask=gtab.b0s_mask
+            b0s_mask=gtab.b0s_mask,
         )
 
     @classmethod
-    def from_dipy_csa(cls, gtab, sphere,
-                      sh_order_max=6,
-                      full_basis=False,
-                      sh_lambda=0.006,
-                      min_signal=1):
+    def from_dipy_csa(
+        cls,
+        gtab,
+        sphere,
+        sh_order_max=6,
+        full_basis=False,
+        sh_lambda=0.006,
+        min_signal=1,
+    ):
         sampling_matrix, _, _ = shm.real_sh_descoteaux(
             sh_order_max, sphere.theta, sphere.phi, full_basis=full_basis, legacy=False
         )
@@ -196,59 +210,73 @@ class BootDirectionGetter(GPUDirectionGetter):
             delta_b=delta_b,
             delta_q=delta_q,
             sampling_matrix=sampling_matrix,
-            b0s_mask=gtab.b0s_mask
+            b0s_mask=gtab.b0s_mask,
         )
 
     def allocate_on_gpu(self, n):
-        self.H_d.append(
-            checkCudaErrors(runtime.cudaMalloc(
-                REAL_SIZE*self.H.size)))
-        self.R_d.append(
-            checkCudaErrors(runtime.cudaMalloc(
-                REAL_SIZE*self.R.size)))
+        self.H_d.append(checkCudaErrors(runtime.cudaMalloc(REAL_SIZE * self.H.size)))
+        self.R_d.append(checkCudaErrors(runtime.cudaMalloc(REAL_SIZE * self.R.size)))
         self.delta_b_d.append(
-            checkCudaErrors(runtime.cudaMalloc(
-                REAL_SIZE*self.delta_b.size)))
+            checkCudaErrors(runtime.cudaMalloc(REAL_SIZE * self.delta_b.size))
+        )
         self.delta_q_d.append(
-            checkCudaErrors(runtime.cudaMalloc(
-                REAL_SIZE*self.delta_q.size)))
+            checkCudaErrors(runtime.cudaMalloc(REAL_SIZE * self.delta_q.size))
+        )
         self.b0s_mask_d.append(
-            checkCudaErrors(runtime.cudaMalloc(
-                np.int32().nbytes*self.b0s_mask.size)))
+            checkCudaErrors(runtime.cudaMalloc(np.int32().nbytes * self.b0s_mask.size))
+        )
         self.sampling_matrix_d.append(
-            checkCudaErrors(runtime.cudaMalloc(
-                REAL_SIZE*self.sampling_matrix.size)))
+            checkCudaErrors(runtime.cudaMalloc(REAL_SIZE * self.sampling_matrix.size))
+        )
 
-        checkCudaErrors(runtime.cudaMemcpy(
-            self.H_d[n],
-            self.H.ctypes.data,
-            REAL_SIZE*self.H.size,
-            cudaMemcpyKind.cudaMemcpyHostToDevice))
-        checkCudaErrors(runtime.cudaMemcpy(
-            self.R_d[n],
-            self.R.ctypes.data,
-            REAL_SIZE*self.R.size,
-            cudaMemcpyKind.cudaMemcpyHostToDevice))
-        checkCudaErrors(runtime.cudaMemcpy(
-            self.delta_b_d[n],
-            self.delta_b.ctypes.data,
-            REAL_SIZE*self.delta_b.size,
-            cudaMemcpyKind.cudaMemcpyHostToDevice))
-        checkCudaErrors(runtime.cudaMemcpy(
-            self.delta_q_d[n],
-            self.delta_q.ctypes.data,
-            REAL_SIZE*self.delta_q.size,
-            cudaMemcpyKind.cudaMemcpyHostToDevice))
-        checkCudaErrors(runtime.cudaMemcpy(
-            self.b0s_mask_d[n],
-            self.b0s_mask.ctypes.data,
-            np.int32().nbytes*self.b0s_mask.size,
-            cudaMemcpyKind.cudaMemcpyHostToDevice))
-        checkCudaErrors(runtime.cudaMemcpy(
-            self.sampling_matrix_d[n],
-            self.sampling_matrix.ctypes.data,
-            REAL_SIZE*self.sampling_matrix.size,
-            cudaMemcpyKind.cudaMemcpyHostToDevice))
+        checkCudaErrors(
+            runtime.cudaMemcpy(
+                self.H_d[n],
+                self.H.ctypes.data,
+                REAL_SIZE * self.H.size,
+                cudaMemcpyKind.cudaMemcpyHostToDevice,
+            )
+        )
+        checkCudaErrors(
+            runtime.cudaMemcpy(
+                self.R_d[n],
+                self.R.ctypes.data,
+                REAL_SIZE * self.R.size,
+                cudaMemcpyKind.cudaMemcpyHostToDevice,
+            )
+        )
+        checkCudaErrors(
+            runtime.cudaMemcpy(
+                self.delta_b_d[n],
+                self.delta_b.ctypes.data,
+                REAL_SIZE * self.delta_b.size,
+                cudaMemcpyKind.cudaMemcpyHostToDevice,
+            )
+        )
+        checkCudaErrors(
+            runtime.cudaMemcpy(
+                self.delta_q_d[n],
+                self.delta_q.ctypes.data,
+                REAL_SIZE * self.delta_q.size,
+                cudaMemcpyKind.cudaMemcpyHostToDevice,
+            )
+        )
+        checkCudaErrors(
+            runtime.cudaMemcpy(
+                self.b0s_mask_d[n],
+                self.b0s_mask.ctypes.data,
+                np.int32().nbytes * self.b0s_mask.size,
+                cudaMemcpyKind.cudaMemcpyHostToDevice,
+            )
+        )
+        checkCudaErrors(
+            runtime.cudaMemcpy(
+                self.sampling_matrix_d[n],
+                self.sampling_matrix.ctypes.data,
+                REAL_SIZE * self.sampling_matrix.size,
+                cudaMemcpyKind.cudaMemcpyHostToDevice,
+            )
+        )
 
     def deallocate_on_gpu(self, n):
         if self.H_d[n]:
@@ -265,9 +293,16 @@ class BootDirectionGetter(GPUDirectionGetter):
             checkCudaErrors(runtime.cudaFree(self.sampling_matrix_d[n]))
 
     def _shared_mem_bytes(self, sp):
-        return REAL_SIZE*BLOCK_Y*2*(
-            sp.gpu_tracker.n32dimt + max(sp.gpu_tracker.n32dimt, sp.gpu_tracker.samplm_nr)) + \
-                np.int32().nbytes*BLOCK_Y*sp.gpu_tracker.samplm_nr
+        return (
+            REAL_SIZE
+            * BLOCK_Y
+            * 2
+            * (
+                sp.gpu_tracker.n32dimt
+                + max(sp.gpu_tracker.n32dimt, sp.gpu_tracker.samplm_nr)
+            )
+            + np.int32().nbytes * BLOCK_Y * sp.gpu_tracker.samplm_nr
+        )
 
     def getNumStreamlines(self, n, nseeds_gpu, block, grid, sp):
         ker = self.module.get_kernel(self.getnum_kernel_name)
@@ -275,7 +310,9 @@ class BootDirectionGetter(GPUDirectionGetter):
         config = LaunchConfig(block=block, grid=grid, shmem_size=shared_memory)
 
         launch(
-            sp.gpu_tracker.streams[n], config, ker,
+            sp.gpu_tracker.streams[n],
+            config,
+            ker,
             self.model_type,
             sp.gpu_tracker.max_angle,
             self.min_signal,
@@ -301,7 +338,8 @@ class BootDirectionGetter(GPUDirectionGetter):
             sp.gpu_tracker.sphere_edges_d[n],
             sp.gpu_tracker.nedges,
             sp.shDirTemp0_d[n],
-            sp.slinesOffs_d[n])
+            sp.slinesOffs_d[n],
+        )
 
     def generateStreamlines(self, n, nseeds_gpu, block, grid, sp):
         ker = self.module.get_kernel(self.genstreamlines_kernel_name)
@@ -309,14 +347,16 @@ class BootDirectionGetter(GPUDirectionGetter):
         config = LaunchConfig(block=block, grid=grid, shmem_size=shared_memory)
 
         launch(
-            sp.gpu_tracker.streams[n], config, ker,
+            sp.gpu_tracker.streams[n],
+            config,
+            ker,
             sp.gpu_tracker.max_angle,
             sp.gpu_tracker.tc_threshold,
             sp.gpu_tracker.step_size,
             sp.gpu_tracker.relative_peak_thresh,
             sp.gpu_tracker.min_separation_angle,
             sp.gpu_tracker.rng_seed,
-            sp.gpu_tracker.rng_offset + n*nseeds_gpu,
+            sp.gpu_tracker.rng_offset + n * nseeds_gpu,
             nseeds_gpu,
             sp.seeds_d[n],
             sp.gpu_tracker.dimx,
@@ -341,7 +381,7 @@ class BootDirectionGetter(GPUDirectionGetter):
             sp.shDirTemp0_d[n],
             sp.slineSeed_d[n],
             sp.slineLen_d[n],
-            sp.sline_d[n]
+            sp.sline_d[n],
         )
 
 
@@ -354,12 +394,16 @@ class ProbDirectionGetter(GPUDirectionGetter):
 
     def getNumStreamlines(self, n, nseeds_gpu, block, grid, sp):
         ker = self.module.get_kernel(self.getnum_kernel_name)
-        shared_memory = REAL_SIZE*BLOCK_Y*sp.gpu_tracker.n32dimt + \
-            np.int32().nbytes*BLOCK_Y*sp.gpu_tracker.n32dimt
+        shared_memory = (
+            REAL_SIZE * BLOCK_Y * sp.gpu_tracker.n32dimt
+            + np.int32().nbytes * BLOCK_Y * sp.gpu_tracker.n32dimt
+        )
         config = LaunchConfig(block=block, grid=grid, shmem_size=shared_memory)
 
         launch(
-            sp.gpu_tracker.streams[n], config, ker,
+            sp.gpu_tracker.streams[n],
+            config,
+            ker,
             sp.gpu_tracker.max_angle,
             sp.gpu_tracker.relative_peak_thresh,
             sp.gpu_tracker.min_separation_angle,
@@ -375,7 +419,8 @@ class ProbDirectionGetter(GPUDirectionGetter):
             sp.gpu_tracker.sphere_edges_d[n],
             sp.gpu_tracker.nedges,
             sp.shDirTemp0_d[n],
-            sp.slinesOffs_d[n])
+            sp.slinesOffs_d[n],
+        )
 
     def _shared_mem_bytes(self, sp):
         return REAL_SIZE * BLOCK_Y * sp.gpu_tracker.n32dimt
@@ -386,14 +431,16 @@ class ProbDirectionGetter(GPUDirectionGetter):
         config = LaunchConfig(block=block, grid=grid, shmem_size=shared_memory)
 
         launch(
-            sp.gpu_tracker.streams[n], config, ker,
+            sp.gpu_tracker.streams[n],
+            config,
+            ker,
             sp.gpu_tracker.max_angle,
             sp.gpu_tracker.tc_threshold,
             sp.gpu_tracker.step_size,
             sp.gpu_tracker.relative_peak_thresh,
             sp.gpu_tracker.min_separation_angle,
             sp.gpu_tracker.rng_seed,
-            sp.gpu_tracker.rng_offset + n*nseeds_gpu,
+            sp.gpu_tracker.rng_offset + n * nseeds_gpu,
             nseeds_gpu,
             sp.seeds_d[n],
             sp.gpu_tracker.dimx,
@@ -410,7 +457,7 @@ class ProbDirectionGetter(GPUDirectionGetter):
             sp.shDirTemp0_d[n],
             sp.slineSeed_d[n],
             sp.slineLen_d[n],
-            sp.sline_d[n]
+            sp.sline_d[n],
         )
 
 
@@ -423,4 +470,3 @@ class PttDirectionGetter(ProbDirectionGetter):
 
     def _shared_mem_bytes(self, sp):
         return 0
-
