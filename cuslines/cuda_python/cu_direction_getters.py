@@ -78,7 +78,7 @@ class GPUDirectionGetter(ABC):
         # I think this is reasonable
         dev = Device()
         dev.set_current()
-        cuda_path = cuslines_cuda.joinpath("generate_streamlines_cuda.cu")
+        cuda_path = cuslines_cuda.joinpath("cuda_c/generate_streamlines_cuda.cu")
         with open(cuda_path, "r") as f:
             prog = Program(f.read(), code_type="c++", options=program_options)
         self.module = prog.compile(
