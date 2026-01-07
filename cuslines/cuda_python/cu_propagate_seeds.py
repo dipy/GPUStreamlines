@@ -78,7 +78,7 @@ class SeedBatchPropagator:
             self.shDirTemp0_d[ii] = checkCudaErrors(runtime.cudaMalloc(
                 REAL3_DTYPE.itemsize * self.gpu_tracker.samplm_nr * grid[0] * block[1]))
 
-    def _cumsum_offsets(self):  # TODO: do this on device? not crucial for performance now
+    def _cumsum_offsets(self):  # TODO: performance: do this on device? not crucial for performance now
         for ii in range(self.ngpus):
             nseeds_gpu, _, _ = self._switch_device(ii)
             if (nseeds_gpu == 0):
@@ -173,7 +173,11 @@ class SeedBatchPropagator:
         self.nSlines_old = self.nSlines
         self.gpu_tracker.rng_offset += self.nseeds
 
-    def propagate(self, seeds): # TODO: better queuing/batching of seeds, if more performance needed
+    # TODO: performance: better queuing/batching of seeds,
+    # if more performance needed,
+    # given exponential nature of streamlines
+    # May be better to do in cuda code directly
+    def propagate(self, seeds):
         self.nseeds = len(seeds)
         self.nseeds_per_gpu = (self.nseeds + self.gpu_tracker.ngpus - 1) // self.gpu_tracker.ngpus
 
@@ -202,13 +206,15 @@ class SeedBatchPropagator:
 
         self._cleanup()
 
-    def as_array_sequence(self):
+    def get_buffer_size(self):
         buffer_size = 0
         for ii in range(self.ngpus):
             lens = self.sline_lens[ii]
             for jj in range(self.nSlines[ii]):
                 buffer_size += lens[jj] * 3 * REAL_SIZE
+        return buffer_size
 
+    def as_generator(self):
         def _yield_slines():
             for ii in range(self.ngpus):
                 this_sls = self.slines[ii]
@@ -220,11 +226,7 @@ class SeedBatchPropagator:
                     yield np.asarray(
                         this_sls[jj],
                         dtype=REAL_DTYPE)[:npts]
+        return _yield_slines()
 
-        return ArraySequence(_yield_slines(), buffer_size // MEGABYTE)
-
-    def to_trx():
-        raise NotImplementedError("Export to TRX not yet implemented")
-    
-    def to_trk():
-        raise NotImplementedError("Export to TRK not yet implemented")
+    def as_array_sequence(self):
+        return ArraySequence(self.as_generator(), self.get_buffer_size() // MEGABYTE)

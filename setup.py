@@ -1,7 +1,6 @@
 from setuptools import setup
 from setuptools.command.build_py import build_py
 from pathlib import Path
-import subprocess
 import re
 
 

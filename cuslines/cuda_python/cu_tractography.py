@@ -1,10 +1,11 @@
 from cuda.bindings import driver, runtime
 from cuda.bindings.runtime import cudaMemcpyKind
-import cuda.core as cc
 # TODO: consider cuda core over cuda bindings
 
 import numpy as np
+from tqdm import tqdm
 import logging
+from math import radians
 
 from cuslines.cuda_python.cutils import (
     REAL_SIZE,
@@ -17,29 +18,81 @@ from cuslines.cuda_python.cu_direction_getters import (
 )
 from cuslines.cuda_python.cu_propagate_seeds import SeedBatchPropagator
 
+from trx.trx_file_memmap import TrxFile
+
+from nibabel.streamlines.tractogram import Tractogram
+from nibabel.streamlines.array_sequence import ArraySequence, MEGABYTE
+
+from dipy.io.stateful_tractogram import Space, StatefulTractogram
 
 logger = logging.getLogger("GPUStreamlines")
 
+# TODO performance:
+# ACT
+# SCIL streamline reduction onboard GPU
+# Remove small/long streamlines on gpu
 
-class GPUTracker:  # TODO: bring in pyAFQ prep stuff
+class GPUTracker:
     def __init__(
         self,
         dg: GPUDirectionGetter,
-        max_angle: float,
-        tc_threshold: float,
-        step_size: float,
-        relative_peak_thresh: float,
-        min_separation_angle: float,
-        dataf: np.ndarray, # TODO: reasonable defaults for floats, reorganize order, better names, documentation
-        metric_map: np.ndarray,
+        dataf: np.ndarray,
+        stop_map: np.ndarray,
+        stop_theshold: float,
         sphere_vertices: np.ndarray,
         sphere_edges: np.ndarray,
+        max_angle: float = radians(60),
+        step_size: float = 0.5,
+        relative_peak_thresh: float = 0.25,
+        min_separation_angle: float = radians(45),
         ngpus: int = 1,
         rng_seed: int = 0,
         rng_offset: int = 0,
+        chunk_size: int = 100000,
     ):
+        """
+        Initialize GPUTracker with necessary data.
+
+        Parameters
+        ----------
+        dg : GPUDirectionGetter
+            Direction getter to use for tracking from
+            cuslines.cu_direction_getters
+        dataf : np.ndarray
+            4D numpy array with ODFs for prob/ptt, diffusion data if doing
+            bootstrapping.
+        stop_map : np.ndarray
+            3D numpy array with stopping metric (e.g., GFA, FA)
+        stop_theshold : float
+            Threshold for stopping metric (e.g., 0.2)
+        sphere_vertices : np.ndarray
+            Vertices of the sphere used for direction sampling.
+        sphere_edges : np.ndarray
+            Edges of the sphere used for direction sampling.
+        max_angle : float, optional
+            Maximum angle (in radians) between steps
+            default: radians(60)
+        step_size : float, optional
+            Step size for tracking
+            default: 0.5
+        relative_peak_thresh : float, optional
+            Relative peak threshold for direction selection
+            default: 0.25
+        min_separation_angle : float, optional
+            Minimum separation angle (in radians) between peaks
+            default: radians(45)
+        ngpus : int, optional
+            Number of GPUs to use
+            default: 1
+        rng_seed : int, optional
+            Seed for random number generator
+            default: 0
+        rng_offset : int, optional
+            Offset for random number generator
+            default: 0
+        """
         self.dataf = np.ascontiguousarray(dataf, dtype=REAL_DTYPE)
-        self.metric_map = np.ascontiguousarray(metric_map, dtype=REAL_DTYPE)
+        self.metric_map = np.ascontiguousarray(stop_map, dtype=REAL_DTYPE)
         self.sphere_vertices = np.ascontiguousarray(sphere_vertices, dtype=REAL_DTYPE)
         self.sphere_edges = np.ascontiguousarray(sphere_edges, dtype=np.int32)
 
@@ -53,7 +106,7 @@ class GPUTracker:  # TODO: bring in pyAFQ prep stuff
 
         self.dg = dg
         self.max_angle = REAL_DTYPE(max_angle)
-        self.tc_threshold = REAL_DTYPE(tc_threshold)
+        self.tc_threshold = REAL_DTYPE(stop_theshold)
         self.step_size = REAL_DTYPE(step_size)
         self.relative_peak_thresh = REAL_DTYPE(relative_peak_thresh)
         self.min_separation_angle = REAL_DTYPE(min_separation_angle)
@@ -61,6 +114,7 @@ class GPUTracker:  # TODO: bring in pyAFQ prep stuff
         self.ngpus = int(ngpus)
         self.rng_seed = int(rng_seed)
         self.rng_offset = int(rng_offset)
+        self.chunk_size = int(chunk_size)
 
         checkCudaErrors(driver.cuInit(0))
         avail = checkCudaErrors(runtime.cudaGetDeviceCount())
@@ -98,6 +152,7 @@ class GPUTracker:  # TODO: bring in pyAFQ prep stuff
         for ii in range(self.ngpus):
             checkCudaErrors(runtime.cudaSetDevice(ii))
 
+            # TODO: performance: dataf could be managed or texture memory instead?
             self.dataf_d.append(
                 checkCudaErrors(runtime.cudaMalloc(
                     REAL_SIZE*self.dataf.size)))
@@ -153,6 +208,89 @@ class GPUTracker:  # TODO: bring in pyAFQ prep stuff
             checkCudaErrors(runtime.cudaStreamDestroy(self.streams[n]))
         return False
 
-    def generate_streamlines(self, seeds):
-        self.seed_propagator.propagate(seeds)
-        return self.seed_propagator.as_array_sequence()
+    def _divide_chunks(self, seeds):
+        global_chunk_sz = self.chunk_size * self.ngpus
+        nchunks = (seeds.shape[0] + global_chunk_sz - 1) // global_chunk_sz
+        return global_chunk_sz, nchunks
+    
+    def generate_sft(self, seeds, ref_img):
+        global_chunk_sz, nchunks = self._divide_chunks(seeds)
+        buffer_size = 0
+        generators = []
+
+        with tqdm(total=seeds.shape[0]) as pbar:
+            for idx in range(nchunks):
+                self.seed_propagator.propagate(
+                    seeds[idx * global_chunk_sz : (idx + 1) * global_chunk_sz]
+                )
+                buffer_size += self.seed_propagator.get_buffer_size()
+                generators.append(self.seed_propagator.as_generator())
+                pbar.update(
+                    seeds[idx * global_chunk_sz : (idx + 1) * global_chunk_sz].shape[0]
+                )
+        array_sequence = ArraySequence(
+            (item for gen in generators for item in gen),
+            buffer_size // MEGABYTE
+        )
+        return StatefulTractogram(array_sequence, ref_img, Space.VOX)
+
+    # TODO: performance: consider a way to just output in VOX space directly
+    def generate_trx(self, seeds, ref_img):
+        global_chunk_sz, nchunks = self._divide_chunks(seeds)
+
+        # Will resize by a factor of 2 if these are exceeded
+        sl_len_guess = 100
+        sl_per_seed_guess = 3
+        n_sls_guess = sl_per_seed_guess * seeds.shape[0]
+
+        # trx files use memory mapping
+        trx_file = TrxFile(
+            reference=ref_img,
+            nb_streamlines=n_sls_guess,
+            nb_vertices=n_sls_guess * sl_len_guess,
+        )
+        trx_file.streamlines._offsets = trx_file.streamlines._offsets.astype(np.uint64)
+        offsets_idx = 0
+        sls_data_idx = 0
+
+        with tqdm(total=seeds.shape[0]) as pbar:
+            for idx in range(int(nchunks)):
+                self.seed_propagator.propagate(
+                    seeds[idx * global_chunk_sz : (idx + 1) * global_chunk_sz]
+                )
+                tractogram = Tractogram(
+                    self.seed_propagator.as_array_sequence(),
+                    affine_to_rasmm=ref_img.affine)
+                tractogram.to_world()
+                sls = tractogram.streamlines
+
+                new_offsets_idx = offsets_idx + len(sls._offsets)
+                new_sls_data_idx = sls_data_idx + len(sls._data)
+
+                if (
+                    new_offsets_idx > trx_file.header["NB_STREAMLINES"]
+                    or new_sls_data_idx > trx_file.header["NB_VERTICES"]
+                ):
+                    print("TRX resizing...")
+                    trx_file.resize(
+                        nb_streamlines=new_offsets_idx * 2,
+                        nb_vertices=new_sls_data_idx * 2,
+                    )
+
+                # TRX uses memmaps here
+                trx_file.streamlines._data[sls_data_idx:new_sls_data_idx] = sls._data
+                trx_file.streamlines._offsets[offsets_idx:new_offsets_idx] = (
+                    sls_data_idx + sls._offsets
+                )
+                trx_file.streamlines._lengths[offsets_idx:new_offsets_idx] = (
+                    sls._lengths
+                )
+
+                offsets_idx = new_offsets_idx
+                sls_data_idx = new_sls_data_idx
+                pbar.update(
+                    seeds[idx * global_chunk_sz : (idx + 1) * global_chunk_sz].shape[0]
+                )
+        trx_file.resize()
+
+        return trx_file
