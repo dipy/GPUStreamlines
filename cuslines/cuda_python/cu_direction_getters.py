@@ -32,7 +32,7 @@ class GPUDirectionGetter(ABC):
         pass
 
     @abstractmethod
-    def generateStreamlines(self):
+    def generateStreamlines(self, n, nseeds_gpu, block, grid, sp):
         pass
 
     def allocate_on_gpu(self, n):
