@@ -40,7 +40,7 @@
 #define FLOOR		floorf
 #define LOG		__logf
 #define EXP		__expf
-#define REAL_MAX	(FLT_MAX)
+#define REAL_MAX	__int_as_float(0x7f7fffffU)
 #define REAL_MIN	(-REAL_MAX)
 #define COS		__cosf
 #define SIN		__sinf
@@ -58,7 +58,7 @@
 #define FLOOR		floor
 #define LOG		log
 #define EXP		exp
-#define REAL_MAX	(DBL_MAX)
+#define REAL_MAX	__longlong_as_double(0x7fefffffffffffffLL)
 #define REAL_MIN	(-REAL_MAX)
 #define COS		cos
 #define SIN		sin
@@ -68,7 +68,7 @@
 #define ACOS		acos
 
 #endif
-
+// TODO: half this in when WMGMI seeding
 #define MAX_SLINE_LEN	(501)
 #define PMF_THRESHOLD_P	((REAL)0.05)
 
@@ -97,5 +97,7 @@ enum ModelType {
   PROB = 2,
   PTT = 3,
 };
+
+enum {OUTSIDEIMAGE, INVALIDPOINT, TRACKPOINT, ENDPOINT};
 
 #endif

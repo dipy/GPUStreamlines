@@ -295,7 +295,7 @@ __device__ int get_direction_ptt_d(
     REAL3_T *__probing_pos_sh = probing_pos_sh + tidy;
 
     const REAL_T probe_step_size = ((step_size / PROBE_FRAC) / (PROBE_QUALITY - 1));
-    const REAL_T max_curvature = 2.0 * SIN(max_angle / 2.0) / step_size;
+    const REAL_T max_curvature = 2.0 * SIN(max_angle / 2.0) / (step_size / PROBE_FRAC); // This seems to work well
     const REAL_T absolpmf_thresh = PMF_THRESHOLD_P * max_d<BDIM_X>(dimt, pmf, REAL_MIN);
 
 #if 0
@@ -473,7 +473,7 @@ __device__ int get_direction_ptt_d(
                 get_probing_frame_d<0>(__frame_sh, st, __probing_frame_sh);
                 propagate_frame_d(__probing_prop_sh, __probing_frame_sh, __direc_sh);
                 norm3_d(__direc_sh, 0); // this will be scaled by the generic stepping code
-                dirs[0] = (REAL3_T) {__direc_sh[0], __direc_sh[1], __direc_sh[2]};
+                dirs[0] = MAKE_REAL3(__direc_sh[0], __direc_sh[1], __direc_sh[2]);
             }
         }
 

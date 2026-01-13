@@ -30,34 +30,38 @@
 import argparse
 import random
 import time
-import zipfile
 
 import numpy as np
-import numpy.linalg as npl
 
 import dipy.reconst.dti as dti
 from dipy.io import read_bvals_bvecs
-from dipy.io.stateful_tractogram import Origin, Space, StatefulTractogram
+from dipy.io.stateful_tractogram import Space, StatefulTractogram
 from dipy.io.streamline import save_tractogram
 from dipy.tracking import utils
 from dipy.core.gradients import gradient_table, unique_bvals_magnitude
 from dipy.data import default_sphere
-from dipy.direction import (BootDirectionGetter, ProbabilisticDirectionGetter, PTTDirectionGetter)
+from dipy.direction import (
+  BootDirectionGetter as cpu_BootDirectionGetter,
+  ProbabilisticDirectionGetter as cpu_ProbDirectionGetter,
+  PTTDirectionGetter as cpu_PTTDirectionGetter)
 from dipy.reconst.shm import OpdtModel, CsaOdfModel
 from dipy.reconst.csdeconv import ConstrainedSphericalDeconvModel, auto_response_ssst
 from dipy.tracking.local_tracking import LocalTracking
 from dipy.tracking.stopping_criterion import ThresholdStoppingCriterion
-from dipy.reconst import shm
 from dipy.data import get_fnames
 from dipy.data import read_stanford_pve_maps
 
 import nibabel as nib
 from nibabel.orientations import aff2axcodes
 
-from trx.trx_file_memmap import TrxFile, zip_from_folder
+from trx.io import save as save_trx
 
-# Import custom module
-import cuslines
+from cuslines import (
+    BootDirectionGetter,
+    GPUTracker,
+    ProbDirectionGetter,
+    PttDirectionGetter,
+)
 
 t0 = time.time()
 
@@ -68,7 +72,7 @@ random.seed(0)
 #Get Gradient values
 def get_gtab(fbval, fbvec):
     bvals, bvecs = read_bvals_bvecs(fbval, fbvec)
-    gtab = gradient_table(bvals, bvecs)
+    gtab = gradient_table(bvals=bvals, bvecs=bvecs)
     return gtab
 
 def get_img(ep2_seq):
@@ -87,7 +91,7 @@ parser.add_argument("--output-prefix", type=str, default ='', help="path to the 
 parser.add_argument("--chunk-size", type=int, default=100000, help="how many seeds to process per sweep, per GPU")
 parser.add_argument("--nseeds", type=int, default=100000, help="how many seeds to process in total")
 parser.add_argument("--ngpus", type=int, default=1, help="number of GPUs to use if using gpu")
-parser.add_argument("--write-method", type=str, default="fast", help="Can be trx, fast, or standard")
+parser.add_argument("--write-method", type=str, default="trk", help="Can be trx or trk")
 parser.add_argument("--max-angle", type=float, default=60, help="max angle (in degrees)")
 parser.add_argument("--min-signal", type=float, default=1.0, help="default: 1.0")
 parser.add_argument("--step-size", type=float, default=0.5, help="default: 0.5")
@@ -101,9 +105,9 @@ parser.add_argument("--dg", type=str, default="boot", choices=['boot', 'prob', '
 
 args = parser.parse_args()
 
-if args.device == "cpu" and args.write_method != "standard":
-  print("WARNING: only standard write method is implemented for cpu testing.")
-  write_method = "standard"
+if args.device == "cpu" and args.write_method != "trk":
+  print("WARNING: only trk write method is implemented for cpu testing.")
+  write_method = "trk"
 else:
   write_method = args.write_method
 
@@ -111,7 +115,8 @@ if 'hardi' in [args.nifti_file, args.bvals, args.bvecs, args.mask_nifti, args.ro
   if not all(arg == 'hardi' for arg in [args.nifti_file, args.bvals, args.bvecs, args.mask_nifti, args.roi_nifti]):
     raise ValueError("If any of the arguments is 'hardi', all must be 'hardi'")
   # Get Stanford HARDI data
-  hardi_nifti_fname, hardi_bval_fname, hardi_bvec_fname = get_fnames('stanford_hardi')
+  hardi_nifti_fname, hardi_bval_fname, hardi_bvec_fname = get_fnames(
+     name='stanford_hardi')
   csf, gm, wm = read_stanford_pve_maps()
   wm_data = wm.get_fdata()
 
@@ -135,18 +140,14 @@ else:
 
 tenmodel = dti.TensorModel(gtab, fit_method='WLS')
 print('Fitting Tensor')
-tenfit = tenmodel.fit(data, mask)
+tenfit = tenmodel.fit(data, mask=mask)
 print('Computing anisotropy measures (FA,MD,RGB)')
 FA = tenfit.fa
-FA[np.isnan(FA)] = 0
 
 # Setup tissue_classifier args
 tissue_classifier = ThresholdStoppingCriterion(FA, args.fa_threshold)
-metric_map = np.asarray(FA, 'float64')
 
 # Create seeds for ROI
-# seed_mask = utils.seeds_from_mask(roi_data, density=args.sampling_density, affine=np.eye(4))
-# seed_mask = seed_mask[0:args.nseeds]
 seed_mask = np.asarray(utils.random_seeds_from_mask(
   roi_data, seeds_count=args.nseeds,
   seed_count_per_voxel=False,
@@ -155,20 +156,27 @@ seed_mask = np.asarray(utils.random_seeds_from_mask(
 # Setup model
 sphere = default_sphere
 if args.model == "opdt":
-  model_type = cuslines.ModelType.OPDT
-  print("Running OPDT model...")
-  model = OpdtModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=args.min_signal)
-  fit_matrix = model._fit_matrix
-  delta_b, delta_q = fit_matrix
+  if args.device == "cpu":
+    model = OpdtModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=args.min_signal)
+    dg = cpu_BootDirectionGetter
+  else:
+    dg = BootDirectionGetter.from_dipy_opdt(
+      gtab,
+      sphere,
+      sh_order_max=args.sh_order,
+      sh_lambda=args.sm_lambda,
+      min_signal=args.min_signal)
 elif args.model == "csa":
-  model_type = cuslines.ModelType.CSA
-  print("Running CSA model...")
-  model = CsaOdfModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=args.min_signal)
-  fit_matrix = model._fit_matrix
-  # Unlike OPDT, CSA has a single matrix used for fit_matrix. Populating delta_b and delta_q with necessary values for
-  # now.
-  delta_b = fit_matrix
-  delta_q = fit_matrix
+  if args.device == "cpu":
+    model = CsaOdfModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=args.min_signal)
+    dg = cpu_BootDirectionGetter
+  else:
+    dg = BootDirectionGetter.from_dipy_csa(
+      gtab,
+      sphere,
+      sh_order_max=args.sh_order,
+      sh_lambda=args.sm_lambda,
+      min_signal=args.min_signal)
 else:
   print("Running CSD model...")
   unique_bvals = unique_bvals_magnitude(gtab.bvals)
@@ -186,158 +194,67 @@ else:
     roi_radii=10,
     fa_thr=0.7)
   model = ConstrainedSphericalDeconvModel(gtab, response, sh_order=args.sh_order)
-  # TODO: we shouldnt have to do this, also for CSA, but we populate delta_b, delta_q.
-  # we need to name change delta_b/delta_q and make it possible for them to be None, or something like this
-  delta_b = model._X
-  delta_q = model.B_reg
-
-if args.dg != "boot":
-  if args.dg == "prob":
-    model_type = cuslines.ModelType.PROB
-    dg = ProbabilisticDirectionGetter
-  else:
-    model_type = cuslines.ModelType.PTT
-    dg = PTTDirectionGetter
-  fit = model.fit(data, mask=(metric_map >= args.fa_threshold))
+  fit = model.fit(data, mask=(FA >= args.fa_threshold))
   data = fit.odf(sphere).clip(min=0)
-else:
-  dg = BootDirectionGetter
-
-global_chunk_size = args.chunk_size
+  if args.dg == "ptt":
+      if args.device == "cpu":
+          dg = cpu_PTTDirectionGetter()
+      else:
+        # Set FOD to 0 outside mask for probing
+        data[FA < args.fa_threshold, :] = 0
+        dg = PttDirectionGetter()
+  elif args.dg == "prob":
+      if args.device == "cpu":
+        dg = cpu_ProbDirectionGetter()
+      else:
+        dg = ProbDirectionGetter()
+  else:
+      raise ValueError("Unknown direction getter type: {}".format(args.dg))
 
 # Setup direction getter args
 if args.device == "cpu":
   if args.dg != "boot":
     dg = dg.from_pmf(data, max_angle=args.max_angle, sphere=sphere, relative_peak_threshold=args.relative_peak_threshold, min_separation_angle=args.min_separation_angle)
   else:
-    dg = BootDirectionGetter.from_data(data, model, max_angle=args.max_angle, sphere=sphere, sh_order=args.sh_order, relative_peak_threshold=args.relative_peak_threshold, min_separation_angle=args.min_separation_angle)
-else:
-  # Setup direction getter args
-  b0s_mask = gtab.b0s_mask
-  dwi_mask = ~b0s_mask
+    dg = dg.from_data(data, model, max_angle=args.max_angle, sphere=sphere, sh_order=args.sh_order, relative_peak_threshold=args.relative_peak_threshold, min_separation_angle=args.min_separation_angle)
 
-  # setup sampling matrix
-  theta = sphere.theta
-  phi = sphere.phi
-  sampling_matrix, _, _ = shm.real_sym_sh_basis(args.sh_order, theta, phi)
-
-  ## from BootPmfGen __init__
-  # setup H and R matrices
-  # TODO: figure out how to get H, R matrices from direction getter object
-  x, y, z = model.gtab.gradients[dwi_mask].T
-  r, theta, phi = shm.cart2sphere(x, y, z)
-  B, _, _ = shm.real_sym_sh_basis(args.sh_order, theta, phi)
-  H = shm.hat(B)
-  R = shm.lcr_matrix(H)
-
-  # create floating point copy of data
-  dataf = np.asarray(data, dtype=np.float64)
-
-  gpu_tracker = cuslines.GPUTracker(model_type,
-                                    args.max_angle * np.pi/180,
-                                    args.min_signal,
-                                    args.fa_threshold,
-                                    args.step_size,
-                                    args.relative_peak_threshold,
-                                    args.min_separation_angle * np.pi/180,
-                                    dataf.astype(np.float64), H.astype(np.float64), R.astype(np.float64), delta_b.astype(np.float64), delta_q.astype(np.float64),
-                                    b0s_mask.astype(np.int32), metric_map.astype(np.float64), sampling_matrix.astype(np.float64),
-                                    sphere.vertices.astype(np.float64), sphere.edges.astype(np.int32),
-                                    ngpus=args.ngpus, rng_seed=0)
-
-print('streamline gen')
-nchunks = (seed_mask.shape[0] + global_chunk_size - 1) // global_chunk_size
-
-t1 = time.time()
-streamline_time = 0
-io_time = 0
-
-if args.output_prefix and write_method == "trx":
-  # Will resize by a factor of 2 if these are exceeded
-  sl_len_guess = 100
-  sl_per_seed_guess = 3
-  n_sls_guess = sl_per_seed_guess*len(seed_mask)
-
-  # trx files use memory mapping
-  trx_file = TrxFile(
-    reference=hardi_nifti_fname,
-    nb_streamlines=n_sls_guess,
-    nb_vertices=n_sls_guess*sl_len_guess)
-  offsets_idx = 0
-  sls_data_idx = 0
-
-for idx in range(int(nchunks)):
-  # Main streamline computation
-  ts = time.time()
-  if args.device == "cpu":
-    streamline_generator = LocalTracking(dg, tissue_classifier, seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size], affine=np.eye(4), step_size=args.step_size)
-    streamlines = [s for s in streamline_generator]
-  else:
-    streamlines = gpu_tracker.generate_streamlines(seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size])
-  te = time.time()
-  streamline_time += (te-ts)
-  print("Generated {} streamlines from {} seeds, time: {} s".format(len(streamlines),
-                                                                    seed_mask[idx*global_chunk_size:(idx+1)*global_chunk_size].shape[0],
-                                                                    te-ts))
-
-  # Save tracklines file
-  if args.output_prefix:
     ts = time.time()
-    if write_method == "standard":
-      fname = "{}.{}_{}.trk".format(args.output_prefix, idx+1, nchunks)
-      sft = StatefulTractogram(streamlines, args.nifti_file, Space.VOX)
-      save_tractogram(sft, fname)
-      te = time.time()
-      print("Saved streamlines to {}, time {} s".format(fname, te-ts))
-    elif write_method == "trx":
-      tractogram = nib.streamlines.Tractogram(streamlines, affine_to_rasmm=img.affine)
-      tractogram.to_world()
-      sls = tractogram.streamlines
+    streamline_generator = LocalTracking(dg, tissue_classifier, seed_mask, affine=np.eye(4), step_size=args.step_size)
+    sft = StatefulTractogram(streamline_generator, img, Space.VOX)
+    n_sls = len(sft.streamlines)
+    te = time.time()
+else:
+    with GPUTracker(
+        dg,
+        data,
+        FA,
+        args.fa_threshold,
+        sphere.vertices,
+        sphere.edges,
+        max_angle=args.max_angle * np.pi/180,
+        step_size=args.step_size,
+        relative_peak_thresh=args.relative_peak_threshold,
+        min_separation_angle=args.min_separation_angle * np.pi/180,
+        ngpus=args.ngpus,
+        rng_seed=0,
+        chunk_size=args.chunk_size
+    ) as gpu_tracker:
+        ts = time.time()
+        if args.output_prefix and write_method == "trx":
+            trx_file = gpu_tracker.generate_trx(seed_mask, img)
+            n_sls = len(trx_file.streamlines)
+        else:
+            sft = gpu_tracker.generate_sft(seed_mask, img)
+            n_sls = len(sft.streamlines)
+        te = time.time()
+print("Generated {} streamlines from {} seeds, time: {} s".format(n_sls,
+                                                                  seed_mask.shape[0],
+                                                                  te-ts))
 
-      new_offsets_idx = offsets_idx + len(sls._offsets)
-      new_sls_data_idx = sls_data_idx + len(sls._data)
-
-      if new_offsets_idx > trx_file.header["NB_STREAMLINES"]\
-          or new_sls_data_idx > trx_file.header["NB_VERTICES"]:
-        print("TRX resizing...")
-        trx_file.resize(nb_streamlines=new_offsets_idx*2, nb_vertices=new_sls_data_idx*2)
-
-      # TRX uses memmaps here
-      trx_file.streamlines._data[sls_data_idx:new_sls_data_idx] = sls._data
-      trx_file.streamlines._offsets[offsets_idx:new_offsets_idx] = offsets_idx + sls._offsets
-      trx_file.streamlines._lengths[offsets_idx:new_offsets_idx] = sls._lengths
-
-      offsets_idx = new_offsets_idx
-      sls_data_idx = new_sls_data_idx
-      
-      te = time.time()
-      print("Streamlines to TRX format, time {} s".format(te-ts))
-    else:
-      fname = "{}.{}_{}".format(args.output_prefix, idx+1, nchunks)
-      gpu_tracker.dump_streamlines(fname, voxel_order, wm.shape, wm.header.get_zooms(), img.affine)
-      te = time.time()
-      print("Saved streamlines to {}, time {} s".format(fname, te-ts))
-
-    io_time += (te-ts)
-
-if args.output_prefix and write_method == "trx":
-  ts = time.time()
-  fname = "{}.trx".format(args.output_prefix)
-  trx_file.resize()
-  zip_from_folder(
-    trx_file._uncompressed_folder_handle.name,
-    fname,
-    zipfile.ZIP_STORED)
-  trx_file.close()
-  te = time.time()
-  print("Saved streamlines to {}, time {} s".format(fname, te-ts))
-  io_time += (te-ts)
-
-t2 = time.time()
-
-print("Completed processing {} seeds.".format(seed_mask.shape[0]))
-print("Initialization time: {} sec".format(t1-t0))
-print("Streamline generation total time: {} sec".format(t2-t1))
-print("\tStreamline processing: {} sec".format(streamline_time))
 if args.output_prefix:
-  print("\tFile writing: {} sec".format(io_time))
+  if write_method == "trx":
+    fname = "{}.trx".format(args.output_prefix)
+    save_trx(trx_file, fname)
+  else:
+    fname = "{}.trk".format(args.output_prefix)
+    save_tractogram(sft, fname)
