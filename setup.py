@@ -1,12 +1,15 @@
 from setuptools import setup
 from setuptools.command.build_py import build_py
 from pathlib import Path
+import os.path as op
 import re
 
 
 def defines_to_python(src, dst):
-    src = Path(src)
-    dst = Path(dst)
+    root = Path(__file__).parent
+
+    src = root / src
+    dst = root / dst
 
     INT_DEFINE = re.compile(
         r"#define\s+(\w+)\s+\(?\s*([0-9]+)\s*\)?"
@@ -33,14 +36,18 @@ def defines_to_python(src, dst):
 
 class build_py_with_cuda(build_py):
     def run(self):
-        root = Path(__file__).parent
-
-        globals_src = str(root / "cuslines" / "globals.h")
-        globals_dst = str(root / "cuslines" / "cuda_python" / "_globals.py")
+        globals_src = op.join("cuslines", "cuda_c", "globals.h")
+        globals_dst = op.join("cuslines", "cuda_python", "_globals.py")
         defines_to_python(globals_src, globals_dst)
 
         super().run()
 
 setup(
     cmdclass={"build_py": build_py_with_cuda},
+    package_data={
+        "cuslines": ["cuda_c/*"],
+    },
+    project_urls={
+        "Homepage": "https://github.com/dipy/GPUStreamlines",
+    }
 )
