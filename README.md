@@ -64,10 +64,5 @@ $ docker pull docker.pkg.github.com/dipy/gpustreamlines/gpustreamlines:latest
 4. Run the code, mounting the current directory into the container for easy result retrieval:
 ```
 $ docker run --gpus=all -v ${PWD}:/opt/exec/output:rw -it docker.pkg.github.com/dipy/gpustreamlines/gpustreamlines:latest \
- python run_gpu_streamlines.py --ngpus 1 --output-prefix output/hardi_gpu_full --use-fast-write
-```
-5. The code produces a number of independent track files (one per processed "chunk"), but we have provided a merge script to combine them into a single trk file. To merge files, run:
-```
-$ docker run --gpus=all -v ${PWD}:/opt/exec/output:rw -it docker.pkg.github.com/dipy/gpustreamlines/gpustreamlines:latest \
- ./merge_trk.sh -o output/hardi_tracks.trk output/hardi_gpu_full*
+ python /opt/GPUStreamlines/run_gpu_streamlines.py --ngpus 1 --output-prefix /opt/exec/output/hardi_gpu_full
 ```
