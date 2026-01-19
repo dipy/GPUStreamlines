@@ -30,8 +30,8 @@ class SeedBatchPropagator:
 
         self.nSlines_old = np.zeros(self.ngpus, dtype=np.int32)
         self.nSlines = np.zeros(self.ngpus, dtype=np.int32)
-        self.slines = np.zeros(self.ngpus, dtype=np.ndarray)
-        self.sline_lens = np.zeros(self.ngpus, dtype=np.ndarray)
+        self.slines = [None] * self.ngpus
+        self.sline_lens = [None] * self.ngpus
 
         self.seeds_d = np.empty(self.ngpus, dtype=DEV_PTR)
         self.slineSeed_d = np.empty(self.ngpus, dtype=DEV_PTR)
@@ -140,19 +140,19 @@ class SeedBatchPropagator:
             )
 
             if self.nSlines[ii] > EXCESS_ALLOC_FACT * self.nSlines_old[ii]:
-                self.slines[ii] = 0
-                self.sline_lens[ii] = 0
+                self.slines[ii] = None
+                self.sline_lens[ii] = None
                 gc.collect()
 
             buffer_size = self._get_sl_buffer_size(ii)
             logger.debug(f"Streamline buffer size: {buffer_size}")
 
-            if not self.slines[ii]:
+            if self.slines[ii] is None:
                 self.slines[ii] = np.empty(
                     (EXCESS_ALLOC_FACT * self.nSlines[ii], MAX_SLINE_LEN * 2, 3),
                     dtype=REAL_DTYPE,
                 )
-            if not self.sline_lens[ii]:
+            if self.sline_lens[ii] is None:
                 self.sline_lens[ii] = np.empty(
                     EXCESS_ALLOC_FACT * self.nSlines[ii], dtype=np.int32
                 )
