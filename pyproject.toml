@@ -15,7 +15,7 @@ dependencies = [
     "dipy",
     "trx-python",
     "nvidia-cuda-runtime",
-    "nvidia-curand",
+    "nvidia-curand-cu12",
     "cuda-python",
     "cuda-core",
     "cuda-cccl"
