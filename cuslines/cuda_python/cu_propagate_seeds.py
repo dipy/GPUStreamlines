@@ -1,4 +1,5 @@
 import numpy as np
+import math
 import gc
 from cuda.bindings import runtime
 from cuda.bindings.runtime import cudaMemcpyKind
@@ -240,7 +241,7 @@ class SeedBatchPropagator:
             lens = self.sline_lens[ii]
             for jj in range(self.nSlines[ii]):
                 buffer_size += lens[jj] * 3 * REAL_SIZE
-        return buffer_size
+        return math.ceil(buffer_size / MEGABYTE)
 
     def as_generator(self):
         def _yield_slines():
@@ -256,4 +257,4 @@ class SeedBatchPropagator:
         return _yield_slines()
 
     def as_array_sequence(self):
-        return ArraySequence(self.as_generator(), self.get_buffer_size() // MEGABYTE)
+        return ArraySequence(self.as_generator(), self.get_buffer_size())

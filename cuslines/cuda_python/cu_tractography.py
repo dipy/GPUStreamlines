@@ -248,7 +248,7 @@ class GPUTracker:
                     seeds[idx * global_chunk_sz : (idx + 1) * global_chunk_sz].shape[0]
                 )
         array_sequence = ArraySequence(
-            (item for gen in generators for item in gen), buffer_size // MEGABYTE
+            (item for gen in generators for item in gen), buffer_size
         )
         return StatefulTractogram(array_sequence, ref_img, Space.VOX)
 
