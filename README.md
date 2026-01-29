@@ -1,7 +1,9 @@
 # GPUStreamlines
 
 ## Installation
-To install, simply run `pip install .` in the top-level repository directory.
+To install from pypi, simply run `pip install "cuslines[cu13]"` or `pip install "cuslines[cu12]"` depending on your CUDA version.
+
+To install from dev, simply run `pip install ".[cu13]"` or `pip install ".[cu12]"` in the top-level repository directory.
 
 ## Running the examples
 This repository contains several example usage scripts.
