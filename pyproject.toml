@@ -13,13 +13,26 @@ dependencies = [
     "nibabel",
     "tqdm",
     "dipy",
-    "trx-python",
+    "trx-python"
+]
+
+[project.optional-dependencies]
+cu13 = [
     "nvidia-cuda-runtime",
     "nvidia-curand-cu12",
-    "cuda-python",
-    "cuda-core",
-    "cuda-cccl"
+    "cuda-python<14",
+    "cuda-core[cu13]",
+    "cuda-cccl[cu13]"
 ]
+
+cu12 = [
+    "nvidia-cuda-runtime-cu12",
+    "nvidia-curand-cu12",
+    "cuda-python<13",
+    "cuda-core[cu12]",
+    "cuda-cccl[cu12]"
+]
+
 
 [tool.setuptools.packages.find]
 where = ["."]
