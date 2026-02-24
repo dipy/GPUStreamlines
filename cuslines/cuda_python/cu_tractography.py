@@ -255,7 +255,6 @@ class GPUTracker:
         )
         return StatefulTractogram(array_sequence, ref_img, Space.VOX)
 
-    # TODO: performance: consider a way to just output in VOX space directly
     def generate_trx(self, seeds, ref_img):
         global_chunk_sz, nchunks = self._divide_chunks(seeds)
 
@@ -265,13 +264,17 @@ class GPUTracker:
         n_sls_guess = sl_per_seed_guess * seeds.shape[0]
 
         # trx files use memory mapping
+        trx_reference = TrxFile(
+            reference=ref_img
+        )
+        trx_reference.streamlines._data = trx_file.streamlines._data.astype(np.float32)
+        trx_reference.streamlines._offsets = trx_file.streamlines._offsets.astype(np.uint64)
+
         trx_file = TrxFile(
-            reference=ref_img,
             nb_streamlines=n_sls_guess,
             nb_vertices=n_sls_guess * sl_len_guess,
+            init_as=trx_reference
         )
-        trx_file.streamlines._data = trx_file.streamlines._data.astype(np.float32)
-        trx_file.streamlines._offsets = trx_file.streamlines._offsets.astype(np.uint64)
         offsets_idx = 0
         sls_data_idx = 0
 
