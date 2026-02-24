@@ -267,8 +267,8 @@ class GPUTracker:
         trx_reference = TrxFile(
             reference=ref_img
         )
-        trx_reference.streamlines._data = trx_file.streamlines._data.astype(np.float32)
-        trx_reference.streamlines._offsets = trx_file.streamlines._offsets.astype(np.uint64)
+        trx_reference.streamlines._data = trx_reference.streamlines._data.astype(np.float32)
+        trx_reference.streamlines._offsets = trx_reference.streamlines._offsets.astype(np.uint64)
 
         trx_file = TrxFile(
             nb_streamlines=n_sls_guess,
