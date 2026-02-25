@@ -44,6 +44,8 @@ class GPUTracker:
         sphere_edges: np.ndarray,
         max_angle: float = radians(60),
         step_size: float = 0.5,
+        min_pts=0,
+        max_pts=np.inf,
         relative_peak_thresh: float = 0.25,
         min_separation_angle: float = radians(45),
         ngpus: int = 1,
@@ -76,6 +78,12 @@ class GPUTracker:
         step_size : float, optional
             Step size for tracking, in voxels
             default: 0.5
+        min_pts : int, optional
+            Minimum number of points in a streamline to be kept
+            default: 0
+        max_pts : int, optional
+            Maximum number of points in a streamline to be kept
+            default: np.inf
         relative_peak_thresh : float, optional
             Relative peak threshold for direction selection
             default: 0.25
@@ -136,7 +144,11 @@ class GPUTracker:
         self.streams = []
         self.managed_data = []
 
-        self.seed_propagator = SeedBatchPropagator(gpu_tracker=self)
+        self.seed_propagator = SeedBatchPropagator(
+            gpu_tracker=self,
+            minlen=min_pts,
+            maxlen=max_pts
+        )
         self._allocated = False
 
     def __enter__(self):
@@ -235,7 +247,7 @@ class GPUTracker:
         nchunks = (seeds.shape[0] + global_chunk_sz - 1) // global_chunk_sz
         return global_chunk_sz, nchunks
 
-    def generate_sft(self, seeds, ref_img, minlen=0, maxlen=np.inf):
+    def generate_sft(self, seeds, ref_img):
         global_chunk_sz, nchunks = self._divide_chunks(seeds)
         buffer_size = 0
         generators = []
@@ -246,8 +258,7 @@ class GPUTracker:
                     seeds[idx * global_chunk_sz : (idx + 1) * global_chunk_sz]
                 )
                 buffer_size += self.seed_propagator.get_buffer_size()
-                generators.append(self.seed_propagator.as_generator(
-                    minlen=minlen, maxlen=maxlen))
+                generators.append(self.seed_propagator.as_generator())
                 pbar.update(
                     seeds[idx * global_chunk_sz : (idx + 1) * global_chunk_sz].shape[0]
                 )
@@ -256,7 +267,7 @@ class GPUTracker:
         )
         return StatefulTractogram(array_sequence, ref_img, Space.VOX)
 
-    def generate_trx(self, seeds, ref_img, minlen=0, maxlen=np.inf):
+    def generate_trx(self, seeds, ref_img):
         global_chunk_sz, nchunks = self._divide_chunks(seeds)
 
         # Will resize by a factor of 2 if these are exceeded
@@ -285,8 +296,7 @@ class GPUTracker:
                     seeds[idx * global_chunk_sz : (idx + 1) * global_chunk_sz]
                 )
                 tractogram = Tractogram(
-                    self.seed_propagator.as_array_sequence(
-                        minlen=minlen, maxlen=maxlen),
+                    self.seed_propagator.as_array_sequence(),
                     affine_to_rasmm=ref_img.affine,
                 )
                 tractogram.to_world()
