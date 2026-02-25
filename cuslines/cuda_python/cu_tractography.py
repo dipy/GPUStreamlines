@@ -74,7 +74,7 @@ class GPUTracker:
             Maximum angle (in radians) between steps
             default: radians(60)
         step_size : float, optional
-            Step size for tracking
+            Step size for tracking, in voxels
             default: 0.5
         relative_peak_thresh : float, optional
             Relative peak threshold for direction selection
@@ -235,7 +235,7 @@ class GPUTracker:
         nchunks = (seeds.shape[0] + global_chunk_sz - 1) // global_chunk_sz
         return global_chunk_sz, nchunks
 
-    def generate_sft(self, seeds, ref_img):
+    def generate_sft(self, seeds, ref_img, minlen=0, maxlen=np.inf):
         global_chunk_sz, nchunks = self._divide_chunks(seeds)
         buffer_size = 0
         generators = []
@@ -246,7 +246,8 @@ class GPUTracker:
                     seeds[idx * global_chunk_sz : (idx + 1) * global_chunk_sz]
                 )
                 buffer_size += self.seed_propagator.get_buffer_size()
-                generators.append(self.seed_propagator.as_generator())
+                generators.append(self.seed_propagator.as_generator(
+                    minlen=minlen, maxlen=maxlen))
                 pbar.update(
                     seeds[idx * global_chunk_sz : (idx + 1) * global_chunk_sz].shape[0]
                 )
@@ -255,12 +256,12 @@ class GPUTracker:
         )
         return StatefulTractogram(array_sequence, ref_img, Space.VOX)
 
-    def generate_trx(self, seeds, ref_img):
+    def generate_trx(self, seeds, ref_img, minlen=0, maxlen=np.inf):
         global_chunk_sz, nchunks = self._divide_chunks(seeds)
 
         # Will resize by a factor of 2 if these are exceeded
         sl_len_guess = 100
-        sl_per_seed_guess = 4
+        sl_per_seed_guess = 2
         n_sls_guess = sl_per_seed_guess * seeds.shape[0]
 
         # trx files use memory mapping
@@ -284,7 +285,8 @@ class GPUTracker:
                     seeds[idx * global_chunk_sz : (idx + 1) * global_chunk_sz]
                 )
                 tractogram = Tractogram(
-                    self.seed_propagator.as_array_sequence(),
+                    self.seed_propagator.as_array_sequence(
+                        minlen=minlen, maxlen=maxlen),
                     affine_to_rasmm=ref_img.affine,
                 )
                 tractogram.to_world()

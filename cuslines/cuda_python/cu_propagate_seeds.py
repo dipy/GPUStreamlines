@@ -243,7 +243,7 @@ class SeedBatchPropagator:
                 buffer_size += lens[jj] * 3 * REAL_SIZE
         return math.ceil(buffer_size / MEGABYTE)
 
-    def as_generator(self):
+    def as_generator(self, minlen=0, maxlen=np.inf):
         def _yield_slines():
             for ii in range(self.ngpus):
                 this_sls = self.slines[ii]
@@ -252,9 +252,14 @@ class SeedBatchPropagator:
                 for jj in range(self.nSlines[ii]):
                     npts = this_len[jj]
 
+                    if npts < minlen or npts > maxlen:
+                        continue
+
                     yield np.asarray(this_sls[jj], dtype=REAL_DTYPE)[:npts]
 
         return _yield_slines()
 
-    def as_array_sequence(self):
-        return ArraySequence(self.as_generator(), self.get_buffer_size())
+    def as_array_sequence(self, minlen=0, maxlen=np.inf):
+        return ArraySequence(
+            self.as_generator(minlen=minlen, maxlen=maxlen),
+            self.get_buffer_size())
