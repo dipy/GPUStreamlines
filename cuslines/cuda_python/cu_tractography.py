@@ -44,6 +44,8 @@ class GPUTracker:
         sphere_edges: np.ndarray,
         max_angle: float = radians(60),
         step_size: float = 0.5,
+        min_pts=0,
+        max_pts=np.inf,
         relative_peak_thresh: float = 0.25,
         min_separation_angle: float = radians(45),
         ngpus: int = 1,
@@ -74,8 +76,14 @@ class GPUTracker:
             Maximum angle (in radians) between steps
             default: radians(60)
         step_size : float, optional
-            Step size for tracking
+            Step size for tracking, in voxels
             default: 0.5
+        min_pts : int, optional
+            Minimum number of points in a streamline to be kept
+            default: 0
+        max_pts : int, optional
+            Maximum number of points in a streamline to be kept
+            default: np.inf
         relative_peak_thresh : float, optional
             Relative peak threshold for direction selection
             default: 0.25
@@ -136,7 +144,11 @@ class GPUTracker:
         self.streams = []
         self.managed_data = []
 
-        self.seed_propagator = SeedBatchPropagator(gpu_tracker=self)
+        self.seed_propagator = SeedBatchPropagator(
+            gpu_tracker=self,
+            minlen=min_pts,
+            maxlen=max_pts
+        )
         self._allocated = False
 
     def __enter__(self):
@@ -260,7 +272,7 @@ class GPUTracker:
 
         # Will resize by a factor of 2 if these are exceeded
         sl_len_guess = 100
-        sl_per_seed_guess = 4
+        sl_per_seed_guess = 2
         n_sls_guess = sl_per_seed_guess * seeds.shape[0]
 
         # trx files use memory mapping

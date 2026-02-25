@@ -25,9 +25,11 @@ logger = logging.getLogger("GPUStreamlines")
 
 
 class SeedBatchPropagator:
-    def __init__(self, gpu_tracker):
+    def __init__(self, gpu_tracker, minlen=0, maxlen=np.inf):
         self.gpu_tracker = gpu_tracker
         self.ngpus = gpu_tracker.ngpus
+        self.minlen = minlen
+        self.maxlen = maxlen
 
         self.nSlines_old = np.zeros(self.ngpus, dtype=np.int32)
         self.nSlines = np.zeros(self.ngpus, dtype=np.int32)
@@ -240,6 +242,8 @@ class SeedBatchPropagator:
         for ii in range(self.ngpus):
             lens = self.sline_lens[ii]
             for jj in range(self.nSlines[ii]):
+                if lens[jj] < self.minlen or lens[jj] > self.maxlen:
+                    continue
                 buffer_size += lens[jj] * 3 * REAL_SIZE
         return math.ceil(buffer_size / MEGABYTE)
 
@@ -252,9 +256,14 @@ class SeedBatchPropagator:
                 for jj in range(self.nSlines[ii]):
                     npts = this_len[jj]
 
+                    if npts < self.minlen or npts > self.maxlen:
+                        continue
+
                     yield np.asarray(this_sls[jj], dtype=REAL_DTYPE)[:npts]
 
         return _yield_slines()
 
     def as_array_sequence(self):
-        return ArraySequence(self.as_generator(), self.get_buffer_size())
+        return ArraySequence(
+            self.as_generator(),
+            self.get_buffer_size())
