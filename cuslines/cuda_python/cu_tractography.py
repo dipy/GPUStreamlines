@@ -332,3 +332,74 @@ class GPUTracker:
         trx_file.resize()
 
         return trx_file
+
+    def generate_trx_grouped_by_len(self, seeds, ref_img, min_len=20, max_len=250, bin_len=10):
+        global_chunk_sz, nchunks = self._divide_chunks(seeds)
+
+        # Will resize by a factor of 2 if these are exceeded
+        sl_per_seed_guess = 3
+        n_sls_guess = sl_per_seed_guess * seeds.shape[0]
+
+
+        bin_starts = np.arange(min_len, max_len + bin_len, bin_len)
+        trx_files = {}
+        offsets_idxs = {}
+        sls_data_idxs = {}
+        for bin_start in bin_starts:
+            max_steps = (bin_start + bin_len) / self.step_size
+            trx_files[bin_start] = TrxFile(
+                reference=ref_img,
+                nb_streamlines=n_sls_guess,
+                nb_vertices=n_sls_guess * max_steps,
+            )
+            trx_files[bin_start].streamlines._offsets = \
+                trx_files[bin_start].streamlines._offsets.astype(np.uint64)
+            offsets_idxs[bin_start] = 0
+            sls_data_idxs[bin_start] = 0
+
+        with tqdm(total=seeds.shape[0]) as pbar:
+            for idx in range(int(nchunks)):
+                self.seed_propagator.propagate(
+                    seeds[idx * global_chunk_sz : (idx + 1) * global_chunk_sz]
+                )
+                bin_indices = self.seed_propagator.gen_bin_indices(bin_starts, bin_len)
+                for bin_start in bin_starts:
+                    tractogram = Tractogram(
+                        self.seed_propagator.as_array_sequence_group(bin_indices, bin_start),
+                        affine_to_rasmm=ref_img.affine,
+                    )
+                    tractogram.to_world()
+                    sls = tractogram.streamlines
+
+                    new_offsets_idx = offsets_idxs[bin_start] + len(sls._offsets)
+                    new_sls_data_idx = sls_data_idxs[bin_start] + len(sls._data)
+
+                    if (
+                        new_offsets_idx > trx_files[bin_start].header["NB_STREAMLINES"]
+                        or new_sls_data_idx > trx_files[bin_start].header["NB_VERTICES"]
+                    ):
+                        logger.info("TRX resizing...")
+                        trx_files[bin_start].resize(
+                            nb_streamlines=new_offsets_idx * 2,
+                            nb_vertices=new_sls_data_idx * 2,
+                        )
+
+                    # TRX uses memmaps here
+                    trx_files[bin_start].streamlines._data[sls_data_idxs[bin_start]:new_sls_data_idx] = sls._data
+                    trx_files[bin_start].streamlines._offsets[offsets_idxs[bin_start]:new_offsets_idx] = (
+                        sls_data_idxs[bin_start] + sls._offsets
+                    )
+                    trx_files[bin_start].streamlines._lengths[offsets_idxs[bin_start]:new_offsets_idx] = (
+                        sls._lengths
+                    )
+
+                    offsets_idxs[bin_start] = new_offsets_idx
+                    sls_data_idxs[bin_start] = new_sls_data_idx
+                pbar.update(
+                    seeds[idx * global_chunk_sz : (idx + 1) * global_chunk_sz].shape[0]
+                )
+
+        for bin_start in bin_starts:
+            trx_files[bin_start].resize()
+
+        return trx_files
