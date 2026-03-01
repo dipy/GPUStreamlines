@@ -4,7 +4,7 @@ import logging
 from importlib.resources import files
 from time import time
 
-from dipy.reconst import shm
+from cuslines.boot_utils import prepare_opdt, prepare_csa
 
 from cuda.core import Device, LaunchConfig, Program, launch, ProgramOptions
 from cuda.pathfinder import find_nvidia_header_directory
@@ -135,83 +135,16 @@ class BootDirectionGetter(GPUDirectionGetter):
         self.compile_program()
 
     @classmethod
-    def from_dipy_opdt(
-        cls,
-        gtab,
-        sphere,
-        sh_order_max=6,
-        full_basis=False,
-        sh_lambda=0.006,
-        min_signal=1,
-    ):
-        sampling_matrix, _, _ = shm.real_sh_descoteaux(
-            sh_order_max, sphere.theta, sphere.phi, full_basis=full_basis, legacy=False
-        )
-
-        model = shm.OpdtModel(
-            gtab, sh_order_max=sh_order_max, smooth=sh_lambda, min_signal=min_signal
-        )
-        fit_matrix = model._fit_matrix
-        delta_b, delta_q = fit_matrix
-
-        b0s_mask = gtab.b0s_mask
-        dwi_mask = ~b0s_mask
-        x, y, z = model.gtab.gradients[dwi_mask].T
-        _, theta, phi = shm.cart2sphere(x, y, z)
-        B, _, _ = shm.real_sym_sh_basis(sh_order_max, theta, phi)
-        H = shm.hat(B)
-        R = shm.lcr_matrix(H)
-
-        return cls(
-            model_type="OPDT",
-            min_signal=min_signal,
-            H=H,
-            R=R,
-            delta_b=delta_b,
-            delta_q=delta_q,
-            sampling_matrix=sampling_matrix,
-            b0s_mask=gtab.b0s_mask,
-        )
+    def from_dipy_opdt(cls, gtab, sphere, sh_order_max=6, full_basis=False,
+                       sh_lambda=0.006, min_signal=1):
+        return cls(**prepare_opdt(gtab, sphere, sh_order_max, full_basis,
+                                  sh_lambda, min_signal))
 
     @classmethod
-    def from_dipy_csa(
-        cls,
-        gtab,
-        sphere,
-        sh_order_max=6,
-        full_basis=False,
-        sh_lambda=0.006,
-        min_signal=1,
-    ):
-        sampling_matrix, _, _ = shm.real_sh_descoteaux(
-            sh_order_max, sphere.theta, sphere.phi, full_basis=full_basis, legacy=False
-        )
-
-        model = shm.CsaOdfModel(
-            gtab, sh_order_max=sh_order_max, smooth=sh_lambda, min_signal=min_signal
-        )
-        fit_matrix = model._fit_matrix
-        delta_b = fit_matrix
-        delta_q = fit_matrix
-
-        b0s_mask = gtab.b0s_mask
-        dwi_mask = ~b0s_mask
-        x, y, z = model.gtab.gradients[dwi_mask].T
-        _, theta, phi = shm.cart2sphere(x, y, z)
-        B, _, _ = shm.real_sym_sh_basis(sh_order_max, theta, phi)
-        H = shm.hat(B)
-        R = shm.lcr_matrix(H)
-
-        return cls(
-            model_type="CSA",
-            min_signal=min_signal,
-            H=H,
-            R=R,
-            delta_b=delta_b,
-            delta_q=delta_q,
-            sampling_matrix=sampling_matrix,
-            b0s_mask=gtab.b0s_mask,
-        )
+    def from_dipy_csa(cls, gtab, sphere, sh_order_max=6, full_basis=False,
+                      sh_lambda=0.006, min_signal=1):
+        return cls(**prepare_csa(gtab, sphere, sh_order_max, full_basis,
+                                 sh_lambda, min_signal))
 
     def allocate_on_gpu(self, n):
         self.H_d.append(checkCudaErrors(runtime.cudaMalloc(REAL_SIZE * self.H.size)))

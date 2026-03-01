@@ -3,12 +3,16 @@
 ## Installation
 To install from pypi, simply run `pip install "cuslines[cu13]"` or `pip install "cuslines[cu12]"` depending on your CUDA version.
 
-To install from dev, simply run `pip install ".[cu13]"` or `pip install ".[cu12]"` in the top-level repository directory.
+For Apple Silicon (M1/M2/M3/M4), install the Metal backend: `pip install "cuslines[metal]"`
+
+To install from dev, simply run `pip install ".[cu13]"` or `pip install ".[cu12]"` (or `pip install ".[metal]"` on macOS) in the top-level repository directory.
+
+The GPU backend is auto-detected at import time. On macOS with Apple Silicon, Metal is used; on Linux/Windows with an NVIDIA GPU, CUDA is used.
 
 ## Running the examples
 This repository contains several example usage scripts.
 
-The script `run_gpu_streamlines.py` demonstrates how to run any diffusion MRI dataset on the GPU. It can also run on the CPU for reference, if the argument `--device=cpu` is used. If not data is passed, it will donaload and use the HARDI dataset.
+The script `run_gpu_streamlines.py` demonstrates how to run any diffusion MRI dataset on the GPU. It can also run on the CPU for reference, if the argument `--device=cpu` is used. Use `--device=metal` to explicitly select the Metal backend on macOS. If no data is passed, it will download and use the HARDI dataset.
 
 To run the baseline CPU example on a random set of 1000 seeds, this is the command and example output:
 ```

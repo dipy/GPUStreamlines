@@ -57,6 +57,7 @@ from nibabel.orientations import aff2axcodes
 from trx.io import save as save_trx
 
 from cuslines import (
+    BACKEND,
     BootDirectionGetter,
     GPUTracker,
     ProbDirectionGetter,
@@ -86,7 +87,7 @@ parser.add_argument("bvals", nargs='?', default='hardi', help="path to the bvals
 parser.add_argument("bvecs", nargs='?', default='hardi', help="path to the bvecs")
 parser.add_argument("mask_nifti", nargs='?', default='hardi', help="path to the mask file")
 parser.add_argument("roi_nifti", nargs='?', default='hardi', help="path to the ROI file")
-parser.add_argument("--device", type=str, default ='gpu', choices=['cpu', 'gpu'], help="Whether to use cpu or gpu")
+parser.add_argument("--device", type=str, default ='gpu', choices=['cpu', 'gpu', 'metal'], help="Whether to use cpu, gpu (auto-detect), or metal")
 parser.add_argument("--output-prefix", type=str, default ='', help="path to the output file")
 parser.add_argument("--chunk-size", type=int, default=100000, help="how many seeds to process per sweep, per GPU")
 parser.add_argument("--nseeds", type=int, default=100000, help="how many seeds to process in total")
@@ -104,6 +105,17 @@ parser.add_argument("--model", type=str, default="opdt", choices=['opdt', 'csa',
 parser.add_argument("--dg", type=str, default="boot", choices=['boot', 'prob', 'ptt'], help="direction getting scheme to use")
 
 args = parser.parse_args()
+
+if args.device == "metal":
+  if BACKEND != "metal":
+    raise RuntimeError("Metal backend requested but not available. "
+                       "Install: pip install 'cuslines[metal]'")
+  if args.ngpus > 1:
+    print("WARNING: Metal backend supports only 1 GPU, ignoring --ngpus %d" % args.ngpus)
+    args.ngpus = 1
+  args.device = "gpu"  # use the GPU code path
+elif args.device == "gpu":
+  print("Using %s backend" % BACKEND)
 
 if args.device == "cpu" and args.write_method != "trk":
   print("WARNING: only trk write method is implemented for cpu testing.")

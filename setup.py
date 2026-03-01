@@ -45,7 +45,7 @@ class build_py_with_cuda(build_py):
 setup(
     cmdclass={"build_py": build_py_with_cuda},
     package_data={
-        "cuslines": ["cuda_c/*"],
+        "cuslines": ["cuda_c/*", "metal_shaders/*"],
     },
     project_urls={
         "Homepage": "https://github.com/dipy/GPUStreamlines",
