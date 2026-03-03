@@ -35,6 +35,14 @@ cu12 = [
     "cuda-cccl[cu12]"
 ]
 
+metal = [
+    "pyobjc-framework-Metal",
+    "pyobjc-framework-MetalPerformanceShaders",
+]
+
+webgpu = [
+    "wgpu>=0.18",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
