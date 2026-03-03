@@ -61,6 +61,15 @@ def _get_cpu_info():
             )
         except Exception:
             pass
+    elif system == "Linux":
+        try:
+            with open("/proc/cpuinfo") as f:
+                for line in f:
+                    if line.startswith("model name"):
+                        name = line.split(":", 1)[1].strip()
+                        break
+        except Exception:
+            pass
 
     return name, total, perf_cores, eff_cores
 

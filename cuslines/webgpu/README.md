@@ -45,6 +45,23 @@ Mean fiber length is ~19% longer on the GPU than CPU due to float32 vs float64 p
 
 The CPU benchmark uses DIPY's `LocalTracking`, which is single-threaded Python. Multi-threaded BLAS/numpy libraries (OpenMP, MKL) do not measurably affect tracking time since each streamline step involves small Python-level operations rather than large matrix computations. Verified: restricting to 1 BLAS thread (`OMP_NUM_THREADS=1`) produces identical CPU timing (~89s at 10k seeds vs ~90s with default threads).
 
+### Linux — NVIDIA RTX 4090
+
+Measured on NVIDIA GeForce RTX 4090 (24 GB VRAM) with AMD Threadripper PRO 7995WX (96 cores / 192 threads), Vulkan backend, same dataset and parameters:
+
+| | CUDA GPU | WebGPU (Vulkan) | CPU (DIPY) |
+|---|---|---|---|
+| **Streamline generation time** | 2.9 s | 19.3 s | 783 s |
+| **Speedup vs CPU** | **~273x** | **~41x** | 1x |
+| **Streamlines generated** | 132,137 | 132,126 | 133,651 |
+| **Mean fiber length** | 46.4 pts | 54.2 pts | 46.4 pts |
+| **Median fiber length** | 34.0 pts | 43.0 pts | 35.0 pts |
+| **Commissural fibers** | 14,297 | 19,299 | 17,454 |
+
+CUDA is ~6.7x faster than WebGPU on the same RTX 4090, matching the expected overhead profile: WebGPU (via wgpu-native/Vulkan) requires explicit `read_buffer()` readbacks and adds a shader translation layer (WGSL → SPIR-V via Naga → Vulkan driver), while CUDA uses direct `cudaMemcpy` and NVRTC-compiled PTX running natively on the GPU. The CUDA backend also has slightly different mean fiber lengths than WebGPU due to differences in the kernel codepaths (float32 precision and reduction strategy).
+
+Comparing across platforms: WebGPU on RTX 4090 via Vulkan (19.3 s) is comparable to WebGPU on M4 Pro via Metal (19.1 s) despite the RTX 4090 having significantly more raw compute — the bottleneck at 100k seeds is readback latency and dispatch overhead rather than shader compute. CUDA's native stack eliminates this overhead, achieving 273x speedup over single-threaded DIPY.
+
 ### Reproducing benchmarks
 
 A self-contained benchmark script auto-detects available backends and prints a comparison table:
