@@ -5,7 +5,7 @@ SHELL ["/bin/bash", "-c"]
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install --assume-yes curl
+RUN apt-get update && apt-get install --assume-yes curl git
 
 RUN curl -L "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh" \
     -o "/tmp/Miniconda3.sh"
