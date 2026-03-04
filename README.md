@@ -1,9 +1,19 @@
 # GPUStreamlines
 
 ## Installation
-To install from pypi, simply run `pip install "cuslines[cu13]"` or `pip install "cuslines[cu12]"` depending on your CUDA version.
+To install from pypi:
+```
+pip install "cuslines[cu13]"   # CUDA 13
+pip install "cuslines[cu12]"   # CUDA 12
+pip install "cuslines[metal]"  # Apple Metal (Apple Silicon)
+```
 
-To install from dev, simply run `pip install ".[cu13]"` or `pip install ".[cu12]"` in the top-level repository directory.
+To install from dev:
+```
+pip install ".[cu13]"    # CUDA 13
+pip install ".[cu12]"    # CUDA 12
+pip install ".[metal]"   # Apple Metal
+```
 
 ## Running the examples
 This repository contains several example usage scripts.
@@ -51,6 +61,10 @@ Destroy GPUTracker...
 Note that if you experience memory errors, you can adjust the `--chunk-size` flag.
 
 To run on more seeds, we suggest setting the `--write-method trx` flag in the GPU script to not get bottlenecked by writing files.
+
+## GPU vs CPU differences
+
+GPU backends (both CUDA and Metal) operate in float32 while DIPY uses float64. This causes slightly different peak selection at fiber crossings where ODF peaks have similar magnitudes. In practice the GPU produces comparable streamline counts and commissural fiber density, with modestly longer fibers on average. See [cuslines/metal/README.md](cuslines/metal/README.md) for detailed Metal benchmarks.
 
 ## Running on AWS with Docker
 First, set up an AWS instance with GPU and ssh into it (we recommend a P3 instance with at least 1 V100 16 GB GPU and a Deep Learning AMI Ubuntu 18.04 v 33.0.). Then do the following:
