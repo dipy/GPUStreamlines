@@ -112,12 +112,19 @@ class WebGPUTracker:
         if "subgroup-barrier" in adapter.features:
             features.append("subgroup-barrier")
 
-        # Request sufficient storage buffer count for boot kernels (17)
+        # Request adapter's maximum limits for buffer sizes and storage buffers.
+        # Without this, the device gets WebGPU spec defaults (256 MB buffer,
+        # 128 MB binding) which are too small for real-world diffusion MRI
+        # datasets (e.g. HBN CSD with asymmetric ODFs can be ~5 GB).
         device = adapter.request_device_sync(
             required_features=features,
             required_limits={
                 "max-storage-buffers-per-shader-stage": 17,
                 "max-bind-groups": 4,
+                "max-buffer-size": adapter.limits["max-buffer-size"],
+                "max-storage-buffer-binding-size": adapter.limits[
+                    "max-storage-buffer-binding-size"
+                ],
             },
         )
 
@@ -125,11 +132,13 @@ class WebGPUTracker:
         self.has_subgroups = "subgroup" in features
 
         info = adapter.info
+        max_buf_mb = device.limits["max-buffer-size"] / (1024 * 1024)
         logger.info(
-            "WebGPU device: %s (backend: %s, subgroups: %s)",
+            "WebGPU device: %s (backend: %s, subgroups: %s, max buffer: %.0f MB)",
             getattr(info, "device", "unknown"),
             getattr(info, "backend_type", "unknown"),
             self.has_subgroups,
+            max_buf_mb,
         )
 
     def _allocate(self):
@@ -137,6 +146,18 @@ class WebGPUTracker:
             return
 
         self._setup_device()
+
+        # Validate buffer sizes against device limits
+        dataf_bytes = self.dataf.nbytes
+        max_buf = self.device.limits["max-buffer-size"]
+        max_binding = self.device.limits["max-storage-buffer-binding-size"]
+        effective_max = min(max_buf, max_binding)
+        if dataf_bytes > effective_max:
+            raise RuntimeError(
+                f"Input data ({dataf_bytes / 1e9:.1f} GB) exceeds WebGPU device "
+                f"buffer limit ({effective_max / 1e9:.1f} GB). "
+                f"Try a smaller volume, fewer ODF directions, or a GPU with more VRAM."
+            )
 
         # Upload static data arrays to GPU buffers
         self.dataf_buf = create_buffer_from_data(

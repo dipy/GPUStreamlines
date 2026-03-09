@@ -139,6 +139,16 @@ class MetalGPUTracker:
         if self._allocated:
             return
 
+        # Validate buffer size against device limit
+        dataf_bytes = self.dataf.nbytes
+        max_buf = self.device.maxBufferLength()
+        if dataf_bytes > max_buf:
+            raise RuntimeError(
+                f"Input data ({dataf_bytes / 1e9:.1f} GB) exceeds Metal device "
+                f"buffer limit ({max_buf / 1e9:.1f} GB). "
+                f"Try a smaller volume or fewer ODF directions."
+            )
+
         # Unified memory: wrap numpy arrays as shared Metal buffers
         self.dataf_buf = _make_shared_buffer(self.device, self.dataf)
         self.metric_map_buf = _make_shared_buffer(self.device, self.metric_map)
