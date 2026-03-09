@@ -52,7 +52,8 @@ cuslines/
     _globals.py                 # AUTO-GENERATED from globals.h (never edit manually)
   cuda_c/                       # CUDA kernel source
     globals.h                   # Source-of-truth for constants (REAL_SIZE, thread config)
-    generate_streamlines_cuda.cu, boot.cu, ptt.cu, tracking_helpers.cu
+    generate_streamlines_cuda.cu, boot.cu, ptt.cu, tracking_helpers.cu, utils.cu
+    cudamacro.h, cuwsort.cuh, ptt.cuh, disc.h
   metal/                        # Metal backend (mirrors cuda_python/)
     mt_tractography.py, mt_propagate_seeds.py, mt_direction_getters.py, mutils.py
   metal_shaders/                # MSL kernel source (mirrors cuda_c/)

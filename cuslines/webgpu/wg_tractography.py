@@ -160,20 +160,29 @@ class WebGPUTracker:
             )
 
         # Upload static data arrays to GPU buffers
-        self.dataf_buf = create_buffer_from_data(
-            self.device, self.dataf.ravel(), label="dataf"
-        )
-        self.metric_map_buf = create_buffer_from_data(
-            self.device, self.metric_map.ravel(), label="metric_map"
-        )
-        self.sphere_vertices_buf = create_buffer_from_data(
-            self.device, self.sphere_vertices.ravel(), label="sphere_vertices"
-        )
-        self.sphere_edges_buf = create_buffer_from_data(
-            self.device, self.sphere_edges.ravel(), label="sphere_edges"
-        )
+        try:
+            self.dataf_buf = create_buffer_from_data(
+                self.device, self.dataf.ravel(), label="dataf"
+            )
+            self.metric_map_buf = create_buffer_from_data(
+                self.device, self.metric_map.ravel(), label="metric_map"
+            )
+            self.sphere_vertices_buf = create_buffer_from_data(
+                self.device, self.sphere_vertices.ravel(), label="sphere_vertices"
+            )
+            self.sphere_edges_buf = create_buffer_from_data(
+                self.device, self.sphere_edges.ravel(), label="sphere_edges"
+            )
 
-        self.dg.setup_device(self.device, self.has_subgroups)
+            self.dg.setup_device(self.device, self.has_subgroups)
+        except Exception:
+            # Clean up any partially allocated buffers
+            self.dataf_buf = None
+            self.metric_map_buf = None
+            self.sphere_vertices_buf = None
+            self.sphere_edges_buf = None
+            self.device = None
+            raise
         self._allocated = True
 
     def __exit__(self, exc_type, exc, tb):

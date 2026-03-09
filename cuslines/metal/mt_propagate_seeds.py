@@ -180,12 +180,9 @@ class MetalSeedBatchPropagator:
         self.gpu_tracker.rng_offset += self.nseeds
 
     def get_buffer_size(self):
-        buffer_size = 0
-        lens = self.sline_lens
-        for jj in range(self.nSlines):
-            if lens[jj] < self.minlen or lens[jj] > self.maxlen:
-                continue
-            buffer_size += lens[jj] * 3 * REAL_SIZE
+        lens = self.sline_lens[:self.nSlines]
+        mask = (lens >= self.minlen) & (lens <= self.maxlen)
+        buffer_size = int(lens[mask].sum()) * 3 * REAL_SIZE
         return math.ceil(buffer_size / MEGABYTE)
 
     def as_generator(self):
