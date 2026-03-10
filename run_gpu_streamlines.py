@@ -102,10 +102,16 @@ parser.add_argument("--fa-threshold",type=float,default=0.1,help="FA threshold")
 parser.add_argument("--relative-peak-threshold",type=float,default=0.25,help="relative peak threshold")
 parser.add_argument("--min-separation-angle",type=float,default=45,help="min separation angle (in degrees)")
 parser.add_argument("--sm-lambda",type=float,default=0.006,help="smoothing lambda")
-parser.add_argument("--model", type=str, default="opdt", choices=['opdt', 'csa', 'csd'], help="model to use")
+parser.add_argument("--model", type=str, default="default", choices=['default', 'opdt', 'csa', 'csd'], help="model to use")
 parser.add_argument("--dg", type=str, default="boot", choices=['boot', 'prob', 'ptt'], help="direction getting scheme to use")
 
 args = parser.parse_args()
+
+if args.model == "default":
+  if args.dg == "boot":
+    args.model = "opdt"
+  else:
+    args.model = "csd"
 
 if args.device == "metal":
   if BACKEND != "metal":
