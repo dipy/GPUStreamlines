@@ -90,7 +90,7 @@ parser.add_argument("roi_nifti", nargs='?', default='hardi', help="path to the R
 parser.add_argument("--device", type=str, default ='gpu', choices=['cpu', 'gpu', 'metal', 'webgpu'], help="Whether to use cpu, gpu (auto-detect), metal, or webgpu")
 parser.add_argument("--sphere", type=str, default='default', choices=['default', 'small'], help="Which sphere to use for direction getting")
 parser.add_argument("--output-prefix", type=str, default ='', help="path to the output file")
-parser.add_argument("--chunk-size", type=int, default=100000, help="how many seeds to process per sweep, per GPU")
+parser.add_argument("--chunk-size", type=int, default=25000, help="how many seeds to process per sweep, per GPU")
 parser.add_argument("--nseeds", type=int, default=100000, help="how many seeds to process in total")
 parser.add_argument("--ngpus", type=int, default=1, help="number of GPUs to use if using gpu")
 parser.add_argument("--write-method", type=str, default="trk", help="Can be trx or trk")
