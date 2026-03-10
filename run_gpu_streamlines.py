@@ -39,7 +39,7 @@ from dipy.io.stateful_tractogram import Space, StatefulTractogram
 from dipy.io.streamline import save_tractogram
 from dipy.tracking import utils
 from dipy.core.gradients import gradient_table, unique_bvals_magnitude
-from dipy.data import default_sphere
+from dipy.data import default_sphere, small_sphere
 from dipy.direction import (
   BootDirectionGetter as cpu_BootDirectionGetter,
   ProbabilisticDirectionGetter as cpu_ProbDirectionGetter,
@@ -88,6 +88,7 @@ parser.add_argument("bvecs", nargs='?', default='hardi', help="path to the bvecs
 parser.add_argument("mask_nifti", nargs='?', default='hardi', help="path to the mask file")
 parser.add_argument("roi_nifti", nargs='?', default='hardi', help="path to the ROI file")
 parser.add_argument("--device", type=str, default ='gpu', choices=['cpu', 'gpu', 'metal', 'webgpu'], help="Whether to use cpu, gpu (auto-detect), metal, or webgpu")
+parser.add_argument("--sphere", type=str, default='default', choices=['default', 'small'], help="Which sphere to use for direction getting")
 parser.add_argument("--output-prefix", type=str, default ='', help="path to the output file")
 parser.add_argument("--chunk-size", type=int, default=100000, help="how many seeds to process per sweep, per GPU")
 parser.add_argument("--nseeds", type=int, default=100000, help="how many seeds to process in total")
@@ -182,7 +183,10 @@ seed_mask = np.asarray(utils.random_seeds_from_mask(
   affine=np.eye(4)))
 
 # Setup model
-sphere = default_sphere
+if args.sphere == "small":
+  sphere = small_sphere
+else:
+  sphere = default_sphere
 if args.model == "opdt":
   if args.device == "cpu":
     model = OpdtModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=args.min_signal)

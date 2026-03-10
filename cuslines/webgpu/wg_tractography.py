@@ -156,7 +156,9 @@ class WebGPUTracker:
             raise RuntimeError(
                 f"Input data ({dataf_bytes / 1e9:.1f} GB) exceeds WebGPU device "
                 f"buffer limit ({effective_max / 1e9:.1f} GB). "
-                f"Try a smaller volume, fewer ODF directions, or a GPU with more VRAM."
+                f"Try a smaller volume, fewer ODF directions, or a GPU with more VRAM. "
+                f"If using 'run_gpu_streamlines.py', consider setting "
+                f"--sphere small"
             )
 
         # Upload static data arrays to GPU buffers
