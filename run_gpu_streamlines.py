@@ -221,7 +221,7 @@ else:
     data,
     roi_radii=10,
     fa_thr=0.7)
-  model = ConstrainedSphericalDeconvModel(gtab, response, sh_order=args.sh_order)
+  model = ConstrainedSphericalDeconvModel(response_gtab, response, sh_order=args.sh_order)
   fit = model.fit(data, mask=(FA >= args.fa_threshold))
   data = fit.odf(sphere).clip(min=0)
   if args.dg == "ptt":
