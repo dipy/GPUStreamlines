@@ -39,7 +39,7 @@ class GPUTracker:
         dg: GPUDirectionGetter,
         dataf: np.ndarray,
         stop_map: np.ndarray,
-        stop_theshold: float,
+        stop_threshold: float,
         sphere_vertices: np.ndarray,
         sphere_edges: np.ndarray,
         max_angle: float = radians(60),
@@ -66,7 +66,7 @@ class GPUTracker:
             bootstrapping.
         stop_map : np.ndarray
             3D numpy array with stopping metric (e.g., GFA, FA)
-        stop_theshold : float
+        stop_threshold : float
             Threshold for stopping metric (e.g., 0.2)
         sphere_vertices : np.ndarray
             Vertices of the sphere used for direction sampling.
@@ -118,7 +118,7 @@ class GPUTracker:
 
         self.dg = dg
         self.max_angle = REAL_DTYPE(max_angle)
-        self.tc_threshold = REAL_DTYPE(stop_theshold)
+        self.tc_threshold = REAL_DTYPE(stop_threshold)
         self.step_size = REAL_DTYPE(step_size)
         self.relative_peak_thresh = REAL_DTYPE(relative_peak_thresh)
         self.min_separation_angle = REAL_DTYPE(min_separation_angle)

@@ -70,7 +70,7 @@ class MetalGPUTracker:
         dg: MetalGPUDirectionGetter,
         dataf: np.ndarray,
         stop_map: np.ndarray,
-        stop_theshold: float,
+        stop_threshold: float,
         sphere_vertices: np.ndarray,
         sphere_edges: np.ndarray,
         max_angle: float = radians(60),
@@ -107,7 +107,7 @@ class MetalGPUTracker:
 
         self.dg = dg
         self.max_angle = np.float32(max_angle)
-        self.tc_threshold = np.float32(stop_theshold)
+        self.tc_threshold = np.float32(stop_threshold)
         self.step_size = np.float32(step_size)
         self.relative_peak_thresh = np.float32(relative_peak_thresh)
         self.min_separation_angle = np.float32(min_separation_angle)
