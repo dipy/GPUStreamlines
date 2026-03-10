@@ -125,6 +125,19 @@ class WebGPUSeedBatchPropagator:
         # Streamline output buffer (flat f32: nSlines * MAX_SLINE_LEN * 2 * 3)
         buffer_count = 2 * 3 * MAX_SLINE_LEN * self.nSlines
         sline_nbytes = buffer_count * REAL_SIZE
+
+        max_binding = device.limits["max-storage-buffer-binding-size"]
+        if sline_nbytes > max_binding:
+            max_slines = max_binding // (2 * 3 * MAX_SLINE_LEN * REAL_SIZE)
+            raise RuntimeError(
+                f"Streamline buffer ({sline_nbytes / 1e9:.1f} GB, "
+                f"{self.nSlines} streamlines) exceeds WebGPU storage buffer "
+                f"binding limit ({max_binding / 1e9:.1f} GB). "
+                f"Reduce --chunk-size (current batch produced {self.nSlines} "
+                f"streamlines from {self.nseeds} seeds; max ~{max_slines} "
+                f"streamlines fit in a single buffer)."
+            )
+
         self.sline_buf = create_empty_buffer(device, sline_nbytes, label="sline")
 
     def _copy_results(self):
