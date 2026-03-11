@@ -1,14 +1,26 @@
 # GPUStreamlines
 
 ## Installation
-To install from pypi, simply run `pip install "cuslines[cu13]"` or `pip install "cuslines[cu12]"` depending on your CUDA version.
+To install from pypi:
+```
+pip install "cuslines[cu13]"    # CUDA 13 (NVIDIA)
+pip install "cuslines[cu12]"    # CUDA 12 (NVIDIA)
+pip install "cuslines[metal]"   # Apple Metal (Apple Silicon)
+pip install "cuslines[webgpu]"  # WebGPU (cross-platform: NVIDIA, AMD, Intel, Apple)
+```
 
-To install from dev, simply run `pip install ".[cu13]"` or `pip install ".[cu12]"` in the top-level repository directory.
+To install from dev:
+```
+pip install ".[cu13]"     # CUDA 13
+pip install ".[cu12]"     # CUDA 12
+pip install ".[metal]"    # Apple Metal
+pip install ".[webgpu]"   # WebGPU (any GPU)
+```
 
 ## Running the examples
 This repository contains several example usage scripts.
 
-The script `run_gpu_streamlines.py` demonstrates how to run any diffusion MRI dataset on the GPU. It can also run on the CPU for reference, if the argument `--device=cpu` is used. If not data is passed, it will donaload and use the HARDI dataset.
+The script `run_gpu_streamlines.py` demonstrates how to run any diffusion MRI dataset on the GPU. It can also run on the CPU for reference, if the argument `--device=cpu` is used. If no data is passed, it will download and use the HARDI dataset.
 
 To run the baseline CPU example on a random set of 1000 seeds, this is the command and example output:
 ```
@@ -51,6 +63,12 @@ Destroy GPUTracker...
 Note that if you experience memory errors, you can adjust the `--chunk-size` flag.
 
 To run on more seeds, we suggest setting the `--write-method trx` flag in the GPU script to not get bottlenecked by writing files.
+
+## GPU vs CPU differences
+
+GPU backends (CUDA, Metal, and WebGPU) operate in float32 while DIPY uses float64. This causes slightly different peak selection at fiber crossings where ODF peaks have similar magnitudes. In practice the GPU produces comparable streamline counts and commissural fiber density, with modestly longer fibers on average. See [cuslines/webgpu/README.md](cuslines/webgpu/README.md) for cross-platform benchmarks and [cuslines/metal/README.md](cuslines/metal/README.md) for Metal-specific details.
+
+The WebGPU backend runs on any GPU (NVIDIA, AMD, Intel, Apple) via [wgpu-py](https://github.com/pygfx/wgpu-py). It is auto-detected when no vendor-specific backend is available. See `python -m cuslines.webgpu.benchmark` for a self-contained benchmark across all available backends.
 
 ## Running on AWS with Docker
 First, set up an AWS instance with GPU and ssh into it (we recommend a P3 instance with at least 1 V100 16 GB GPU and a Deep Learning AMI Ubuntu 18.04 v 33.0.). Then do the following:

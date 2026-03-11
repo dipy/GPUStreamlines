@@ -4,3 +4,12 @@
 *.pyo
 *.pyd
 
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# Test outputs
+*.trk
+*.trx
+*.nii.gz

@@ -39,7 +39,7 @@ from dipy.io.stateful_tractogram import Space, StatefulTractogram
 from dipy.io.streamline import save_tractogram
 from dipy.tracking import utils
 from dipy.core.gradients import gradient_table, unique_bvals_magnitude
-from dipy.data import default_sphere
+from dipy.data import default_sphere, small_sphere
 from dipy.direction import (
   BootDirectionGetter as cpu_BootDirectionGetter,
   ProbabilisticDirectionGetter as cpu_ProbDirectionGetter,
@@ -57,6 +57,7 @@ from nibabel.orientations import aff2axcodes
 from trx.io import save as save_trx
 
 from cuslines import (
+    BACKEND,
     BootDirectionGetter,
     GPUTracker,
     ProbDirectionGetter,
@@ -86,9 +87,10 @@ parser.add_argument("bvals", nargs='?', default='hardi', help="path to the bvals
 parser.add_argument("bvecs", nargs='?', default='hardi', help="path to the bvecs")
 parser.add_argument("mask_nifti", nargs='?', default='hardi', help="path to the mask file")
 parser.add_argument("roi_nifti", nargs='?', default='hardi', help="path to the ROI file")
-parser.add_argument("--device", type=str, default ='gpu', choices=['cpu', 'gpu'], help="Whether to use cpu or gpu")
+parser.add_argument("--device", type=str, default ='gpu', choices=['cpu', 'gpu', 'metal', 'webgpu'], help="Whether to use cpu, gpu (auto-detect), metal, or webgpu")
+parser.add_argument("--sphere", type=str, default='default', choices=['default', 'small'], help="Which sphere to use for direction getting")
 parser.add_argument("--output-prefix", type=str, default ='', help="path to the output file")
-parser.add_argument("--chunk-size", type=int, default=100000, help="how many seeds to process per sweep, per GPU")
+parser.add_argument("--chunk-size", type=int, default=25000, help="how many seeds to process per sweep, per GPU")
 parser.add_argument("--nseeds", type=int, default=100000, help="how many seeds to process in total")
 parser.add_argument("--ngpus", type=int, default=1, help="number of GPUs to use if using gpu")
 parser.add_argument("--write-method", type=str, default="trk", help="Can be trx or trk")
@@ -100,10 +102,43 @@ parser.add_argument("--fa-threshold",type=float,default=0.1,help="FA threshold")
 parser.add_argument("--relative-peak-threshold",type=float,default=0.25,help="relative peak threshold")
 parser.add_argument("--min-separation-angle",type=float,default=45,help="min separation angle (in degrees)")
 parser.add_argument("--sm-lambda",type=float,default=0.006,help="smoothing lambda")
-parser.add_argument("--model", type=str, default="opdt", choices=['opdt', 'csa', 'csd'], help="model to use")
+parser.add_argument("--model", type=str, default="default", choices=['default', 'opdt', 'csa', 'csd'], help="model to use")
 parser.add_argument("--dg", type=str, default="boot", choices=['boot', 'prob', 'ptt'], help="direction getting scheme to use")
 
 args = parser.parse_args()
+
+if args.model == "default":
+  if args.dg == "boot":
+    args.model = "opdt"
+  else:
+    args.model = "csd"
+
+if args.device == "metal":
+  if BACKEND != "metal":
+    raise RuntimeError("Metal backend requested but not available. "
+                       "Install: pip install 'cuslines[metal]'")
+  if args.ngpus > 1:
+    print("WARNING: Metal backend supports only 1 GPU, ignoring --ngpus %d" % args.ngpus)
+    args.ngpus = 1
+  args.device = "gpu"  # use the GPU code path
+elif args.device == "webgpu":
+  try:
+    from cuslines.webgpu import (
+        WebGPUTracker as GPUTracker,
+        WebGPUProbDirectionGetter as ProbDirectionGetter,
+        WebGPUPttDirectionGetter as PttDirectionGetter,
+        WebGPUBootDirectionGetter as BootDirectionGetter,
+    )
+  except ImportError:
+    raise RuntimeError("WebGPU backend requested but not available. "
+                       "Install: pip install 'cuslines[webgpu]'")
+  if args.ngpus > 1:
+    print("WARNING: WebGPU backend supports only 1 GPU, ignoring --ngpus %d" % args.ngpus)
+    args.ngpus = 1
+  print("Using webgpu backend")
+  args.device = "gpu"  # use the GPU code path
+elif args.device == "gpu":
+  print("Using %s backend" % BACKEND)
 
 if args.device == "cpu" and args.write_method != "trk":
   print("WARNING: only trk write method is implemented for cpu testing.")
@@ -154,7 +189,10 @@ seed_mask = np.asarray(utils.random_seeds_from_mask(
   affine=np.eye(4)))
 
 # Setup model
-sphere = default_sphere
+if args.sphere == "small":
+  sphere = small_sphere
+else:
+  sphere = default_sphere
 if args.model == "opdt":
   if args.device == "cpu":
     model = OpdtModel(gtab, sh_order=args.sh_order, smooth=args.sm_lambda, min_signal=args.min_signal)
@@ -193,7 +231,7 @@ else:
     data,
     roi_radii=10,
     fa_thr=0.7)
-  model = ConstrainedSphericalDeconvModel(gtab, response, sh_order=args.sh_order)
+  model = ConstrainedSphericalDeconvModel(response_gtab, response, sh_order=args.sh_order)
   fit = model.fit(data, mask=(FA >= args.fa_threshold))
   data = fit.odf(sphere).clip(min=0)
   if args.dg == "ptt":
