@@ -263,6 +263,41 @@ class SeedBatchPropagator:
 
         return _yield_slines()
 
+    def gen_bin_indices(self, bin_starts, bin_len):
+        bin_edges = np.append(bin_starts, bin_starts[-1] + bin_len)
+        bin_indices = {k: [] for k in range(len(bin_starts))}
+        
+        for ii in range(self.ngpus):
+            scaled_lens = self.sline_lens[ii] * self.gpu_tracker.step_size
+            assignments = np.digitize(scaled_lens, bin_edges) - 1
+            
+            for k in range(len(bin_starts)):
+                jj_indices = np.where(assignments == k)[0]
+                if jj_indices.size > 0:
+                    bin_indices[k].append((ii, jj_indices))
+
+        return bin_indices
+
+    def as_array_sequence_group(self, bin_indices, bin_start):
+        relevant_blocks = bin_indices[bin_start]
+
+        def _yield_slines():
+            for ii, jj_array in relevant_blocks:
+                gpu_slines = self.slines[ii]
+                gpu_lens = self.sline_lens[ii]
+                for jj in jj_array:
+                    npts = gpu_lens[jj]
+                    yield np.asarray(gpu_slines[jj], dtype=REAL_DTYPE)[:npts]
+
+        def _get_buffer_size():
+            total_pts = 0
+            for ii, jj_array in relevant_blocks:
+                total_pts += np.sum(self.sline_lens[ii][jj_array])
+
+            return math.ceil((total_pts * 3 * REAL_SIZE) / MEGABYTE)
+
+        return ArraySequence(_yield_slines(), _get_buffer_size())
+
     def as_array_sequence(self):
         return ArraySequence(
             self.as_generator(),
