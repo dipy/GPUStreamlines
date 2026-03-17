@@ -52,11 +52,19 @@ __global__ void getNumStreamlinesPtt_k(
                 // __pmf_data_sh[i] = tex3D<REAL_T>(*pmf, point.x, point.y, z_query);
 
                 REAL_T x_query = (REAL_T)(i * dimx) + point.x;
+                // REAL_T x_query = (REAL_T)(i) + point.x*dimt;
                 __pmf_data_sh[i] = tex3D<REAL_T>(*pmf, x_query, point.y, point.z);
         }
         __syncwarp(WMASK);
     
         const REAL_T absolpmf_thresh = PMF_THRESHOLD_P * max_d<BDIM_X>(dimt, __pmf_data_sh, REAL_MIN);
+        if (blockIdx.x*blockDim.y + threadIdx.y == 0) {
+                for (int i = 0; i < dimt; i++) {
+                        printf("%f ", __pmf_data_sh[i]);
+                }
+                printf("\n");
+                printf("seed %d: point (%f, %f, %f), max pmf value: %f\n", slid, point.x, point.y, point.z, absolpmf_thresh);
+        }
         __syncwarp(WMASK);
 
         #pragma unroll
