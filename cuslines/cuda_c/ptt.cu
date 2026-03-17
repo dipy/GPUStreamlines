@@ -65,8 +65,8 @@ __device__ REAL_T interp4_d(const REAL3_T pos, const REAL_T* frame,
     }
 #endif
 
-    float z_query = pos.z + (float)(closest_odf_idx * dimz);
-    return tex3D<float>(pmf, pos.x, pos.y, z_query);
+    REAL_T z_query = pos.z + (REAL_T)(closest_odf_idx * dimz);
+    return tex3D<REAL_T>(pmf, pos.x, pos.y, z_query);
 }
 
 template<typename REAL_T>

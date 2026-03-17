@@ -133,6 +133,7 @@ class SeedBatchPropagator:
         for ii in range(self.ngpus):
             self._switch_device(ii)
 
+            print(self.nSlines[ii])
             self.slineSeed_d[ii] = checkCudaErrors(
                 runtime.cudaMalloc(self.nSlines[ii] * np.int32().nbytes)
             )

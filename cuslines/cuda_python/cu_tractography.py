@@ -184,7 +184,7 @@ class GPUTracker:
         else:
             extent = runtime.make_cudaExtent(self.dimx, self.dimy, self.dimz * self.dimt)
             dataf_array = checkCudaErrors(runtime.cudaMalloc3DArray(channelDesc, extent, 0))
-    
+
             copyParams = runtime.cudaMemcpy3DParms()
             copyParams.srcPtr = runtime.make_cudaPitchedPtr(
                 self.dataf.ctypes.data,
@@ -192,6 +192,7 @@ class GPUTracker:
                 self.dimx,
                 self.dimy
             )
+
         copyParams.dstArray = dataf_array
         copyParams.extent = extent
         copyParams.kind = cudaMemcpyKind.cudaMemcpyHostToDevice
