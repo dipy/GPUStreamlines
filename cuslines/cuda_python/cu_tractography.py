@@ -167,13 +167,13 @@ class GPUTracker:
             32, 0, 0, 0,
             runtime.cudaChannelFormatKind.cudaChannelFormatKindFloat
         ))
-        # TODO: test each way 
-        if False:
+        if True:
+            print(self.dimt, self.dimx, self.dimy, self.dimz)
             extent = runtime.make_cudaExtent(self.dimt * self.dimx, self.dimy, self.dimz)
             dataf_array = checkCudaErrors(runtime.cudaMalloc3DArray(channelDesc, extent, 0))
 
-
-            data_f_rearranged = np.transpose(self.dataf, (3, 0, 1, 2)).reshape((self.dimt * self.dimx, self.dimy, self.dimz))
+            data_f_rearranged = np.transpose(self.dataf, (3, 0, 1, 2))
+            print(data_f_rearranged.shape)
             data_f_rearranged = np.ascontiguousarray(data_f_rearranged, dtype=REAL_DTYPE)
             copyParams = runtime.cudaMemcpy3DParms()
             copyParams.srcPtr = runtime.make_cudaPitchedPtr(
@@ -185,6 +185,9 @@ class GPUTracker:
             extent = runtime.make_cudaExtent(self.dimx, self.dimy, self.dimz * self.dimt)
             dataf_array = checkCudaErrors(runtime.cudaMalloc3DArray(channelDesc, extent, 0))
 
+            # data_f_rearranged = np.transpose(self.dataf, (0, 1, 3, 2))
+            # data_f_rearranged = np.ascontiguousarray(data_f_rearranged, dtype=REAL_DTYPE)
+            # data_f_rearranged = self.dataf
             copyParams = runtime.cudaMemcpy3DParms()
             copyParams.srcPtr = runtime.make_cudaPitchedPtr(
                 self.dataf.ctypes.data,
