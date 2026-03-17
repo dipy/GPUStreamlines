@@ -41,7 +41,7 @@ class GPUDirectionGetter(ABC):
     def deallocate_on_gpu(self, n):
         pass
 
-    def compile_program(self, debug: bool = True):
+    def compile_program(self, debug: bool = False):
         start_time = time()
         logger.info("Compiling GPUStreamlines")
 
