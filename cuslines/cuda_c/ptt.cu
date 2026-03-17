@@ -23,7 +23,7 @@ __device__ __forceinline__ void crossnorm3_d(REAL_T *dest, const REAL_T *src1, c
 
 template<int BDIM_X, typename REAL_T, typename REAL3_T>
 __device__ REAL_T interp4_d(const REAL3_T pos, const REAL_T* frame,
-                            const cudaTextureObject_t pmf,
+                            const cudaTextureObject_t *__restrict__ pmf,
                             const int dimx, const int dimy, const int dimz, const int dimt,
                             const REAL3_T *__restrict__ odf_sphere_vertices) {
     const int tidx = threadIdx.x;
@@ -66,7 +66,7 @@ __device__ REAL_T interp4_d(const REAL3_T pos, const REAL_T* frame,
 #endif
 
     REAL_T z_query = pos.z + (REAL_T)(closest_odf_idx * dimz);
-    return tex3D<REAL_T>(pmf, pos.x, pos.y, z_query);
+    return tex3D<REAL_T>(*pmf, pos.x, pos.y, z_query);
 }
 
 template<typename REAL_T>
@@ -186,7 +186,7 @@ __device__ void propagate_frame_d(REAL_T* propagator, REAL_T* frame, REAL_T* dir
 
 template<int BDIM_X, typename REAL_T, typename REAL3_T>
 __device__ REAL_T calculate_data_support_d(REAL_T support,
-                                           const REAL3_T pos, const cudaTextureObject_t pmf,
+                                           const REAL3_T pos, const cudaTextureObject_t *__restrict__ pmf,
                                            const int dimx, const int dimy, const int dimz, const int dimt,
                                            const REAL_T probe_step_size,
                                            const REAL_T absolpmf_thresh,
@@ -244,7 +244,7 @@ template<int BDIM_X,
          typename REAL3_T>
 __device__ int get_direction_ptt_d(
     curandStatePhilox4_32_10_t *st,
-    const cudaTextureObject_t pmf,
+    const cudaTextureObject_t *__restrict__ pmf,
     const REAL_T max_angle,
     const REAL_T step_size,
     REAL3_T dir,
@@ -488,7 +488,7 @@ template<int BDIM_X,
          typename REAL3_T>
 __device__ bool init_frame_ptt_d(
     curandStatePhilox4_32_10_t *st,
-    const cudaTextureObject_t pmf,
+    const cudaTextureObject_t *__restrict__ pmf,
     const REAL_T max_angle,
     const REAL_T step_size,
     REAL3_T first_step,

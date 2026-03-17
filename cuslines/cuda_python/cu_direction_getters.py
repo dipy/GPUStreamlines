@@ -408,7 +408,7 @@ class PttDirectionGetter(ProbDirectionGetter):
     def __init__(self):
         checkCudaErrors(driver.cuInit(0))
         self.getnum_kernel_name = f"getNumStreamlinesPtt_k<{THR_X_SL},{BLOCK_Y},{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
-        self.genstreamlines_kernel_name = f"genStreamlinesMergeProb_k<{THR_X_SL},{BLOCK_Y},PTT,const cudaTextureObject_t,{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
+        self.genstreamlines_kernel_name = f"genStreamlinesMergeProb_k<{THR_X_SL},{BLOCK_Y},PTT,const cudaTextureObject_t *__restrict__,{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
         self.compile_program()
 
     def _shared_mem_bytes(self, sp):
