@@ -163,14 +163,14 @@ class GPUTracker:
                 "PTT on CUDA uses texture memory "
                 "which only supports 32-bit floats"))
 
-        channelDesc = runtime.cudaCreateChannelDesc(
+        channelDesc = checkCudaErrors(runtime.cudaCreateChannelDesc(
             32, 0, 0, 0,
-            runtime.cudaChannelFormatKindFloat
-        )       
+            runtime.cudaChannelFormatKind.cudaChannelFormatKindFloat
+        ))
         # TODO: test each way 
         if False:
             extent = runtime.make_cudaExtent(self.dimt * self.dimx, self.dimy, self.dimz)
-            dataf_array = checkCudaErrors(runtime.cudaMalloc3DArray(channelDesc, extent))
+            dataf_array = checkCudaErrors(runtime.cudaMalloc3DArray(channelDesc, extent, 0))
 
 
             data_f_rearranged = np.transpose(self.dataf, (3, 0, 1, 2)).reshape((self.dimt * self.dimx, self.dimy, self.dimz))
@@ -183,7 +183,7 @@ class GPUTracker:
                 self.dimy)
         else:
             extent = runtime.make_cudaExtent(self.dimx, self.dimy, self.dimz * self.dimt)
-            dataf_array = checkCudaErrors(runtime.cudaMalloc3DArray(channelDesc, extent))
+            dataf_array = checkCudaErrors(runtime.cudaMalloc3DArray(channelDesc, extent, 0))
     
             copyParams = runtime.cudaMemcpy3DParms()
             copyParams.srcPtr = runtime.make_cudaPitchedPtr(
@@ -194,19 +194,19 @@ class GPUTracker:
             )
         copyParams.dstArray = dataf_array
         copyParams.extent = extent
-        copyParams.kind = runtime.cudaMemcpyHostToDevice
+        copyParams.kind = cudaMemcpyKind.cudaMemcpyHostToDevice
         checkCudaErrors(runtime.cudaMemcpy3D(copyParams))
 
         resDesc = runtime.cudaResourceDesc()
-        resDesc.resType = runtime.cudaResourceTypeArray
+        resDesc.resType = runtime.cudaResourceType.cudaResourceTypeArray
         resDesc.res.array.array = dataf_array
 
         texDesc = runtime.cudaTextureDesc()
-        texDesc.addressMode[0] = runtime.cudaAddressModeClamp
-        texDesc.addressMode[1] = runtime.cudaAddressModeClamp
-        texDesc.addressMode[2] = runtime.cudaAddressModeClamp
-        texDesc.filterMode = runtime.cudaFilterModeLinear
-        texDesc.readMode = runtime.cudaReadModeElementType
+        texDesc.addressMode[0] = runtime.cudaTextureAddressMode.cudaAddressModeClamp
+        texDesc.addressMode[1] = runtime.cudaTextureAddressMode.cudaAddressModeClamp
+        texDesc.addressMode[2] = runtime.cudaTextureAddressMode.cudaAddressModeClamp
+        texDesc.filterMode = runtime.cudaTextureFilterMode.cudaFilterModeLinear
+        texDesc.readMode = runtime.cudaTextureReadMode.cudaReadModeElementType
         texDesc.normalizedCoords = 0
 
         texObj = checkCudaErrors(runtime.cudaCreateTextureObject(resDesc, texDesc, None))

@@ -333,6 +333,11 @@ class ProbDirectionGetter(GPUDirectionGetter):
         )
         config = LaunchConfig(block=block, grid=grid, shmem_size=shared_memory)
 
+        if isinstance(sp.gpu_tracker.dataf_d[n], runtime.cudaTextureObject_t):
+            dataf_d_n = sp.gpu_tracker.dataf_d[n].getPtr()
+        else:
+            dataf_d_n = sp.gpu_tracker.dataf_d[n]
+
         launch(
             sp.gpu_tracker.streams[n],
             config,
@@ -347,7 +352,7 @@ class ProbDirectionGetter(GPUDirectionGetter):
             sp.gpu_tracker.dimy,
             sp.gpu_tracker.dimz,
             sp.gpu_tracker.dimt,
-            sp.gpu_tracker.dataf_d[n],
+            dataf_d_n,
             sp.gpu_tracker.sphere_vertices_d[n],
             sp.gpu_tracker.sphere_edges_d[n],
             sp.gpu_tracker.nedges,
@@ -362,6 +367,11 @@ class ProbDirectionGetter(GPUDirectionGetter):
         ker = self.module.get_kernel(self.genstreamlines_kernel_name)
         shared_memory = self._shared_mem_bytes(sp)
         config = LaunchConfig(block=block, grid=grid, shmem_size=shared_memory)
+
+        if isinstance(sp.gpu_tracker.dataf_d[n], runtime.cudaTextureObject_t):
+            dataf_d_n = sp.gpu_tracker.dataf_d[n].getPtr()
+        else:
+            dataf_d_n = sp.gpu_tracker.dataf_d[n]
 
         launch(
             sp.gpu_tracker.streams[n],
@@ -380,7 +390,7 @@ class ProbDirectionGetter(GPUDirectionGetter):
             sp.gpu_tracker.dimy,
             sp.gpu_tracker.dimz,
             sp.gpu_tracker.dimt,
-            sp.gpu_tracker.dataf_d[n],
+            dataf_d_n,
             sp.gpu_tracker.metric_map_d[n],
             sp.gpu_tracker.samplm_nr,
             sp.gpu_tracker.sphere_vertices_d[n],

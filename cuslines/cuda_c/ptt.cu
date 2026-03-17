@@ -289,9 +289,9 @@ __device__ int get_direction_ptt_d(
     REAL_T *__direc_sh = direc_sh + tidy*3;
     REAL3_T *__probing_pos_sh = probing_pos_sh + tidy;
 
-    const REAL_T probe_step_size = ((step_size / PROBE_FRAC) / (PROBE_QUALITY - 1));
+    const REAL_T probe_step_size = ((step_size / PROBE_FRAC) / (PROBE_QUALITY - 1));  // TODO: is this -1 necessary?
     const REAL_T max_curvature = 2.0 * SIN(max_angle / 2.0) / (step_size / PROBE_FRAC); // This seems to work well
-    const REAL_T absolpmf_thresh = 0; // PMF_THRESHOLD_P * max_d<BDIM_X>(dimt, pmf, REAL_MIN); TODO: try 2.84
+    const REAL_T absolpmf_thresh = 0; // PMF_THRESHOLD_P * max_d<BDIM_X>(dimt, pmf, REAL_MIN); TODO: try 2.84 for max; i mean, this is completely broken
 
 #if 0
         printf("absolpmf_thresh: %f, max_curvature: %f, probe_step_size: %f\n", absolpmf_thresh, max_curvature, probe_step_size);
