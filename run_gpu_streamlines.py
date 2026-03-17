@@ -106,6 +106,7 @@ parser.add_argument("--sm-lambda",type=float,default=0.006,help="smoothing lambd
 parser.add_argument("--model", type=str, default="default", choices=['default', 'opdt', 'csa', 'csd'], help="model to use")
 parser.add_argument("--dg", type=str, default="boot", choices=['boot', 'prob', 'ptt'], help="direction getting scheme to use")
 parser.add_argument("--cache-dir", type=str, default='', help="cache directory for FA and ODFs")
+parser.add_argument("--seed-seed", type=int, default=None, help="seed for seeding")
 
 args = parser.parse_args()
 
@@ -196,6 +197,7 @@ tissue_classifier = ThresholdStoppingCriterion(FA, args.fa_threshold)
 seed_mask = np.asarray(utils.random_seeds_from_mask(
   roi_data, seeds_count=args.nseeds,
   seed_count_per_voxel=False,
+  random_seed=args.seed_seed,
   affine=np.eye(4)))
 
 # Setup model
