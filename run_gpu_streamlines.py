@@ -30,6 +30,7 @@
 import argparse
 import random
 import time
+import os.path as op
 
 import numpy as np
 
@@ -104,6 +105,7 @@ parser.add_argument("--min-separation-angle",type=float,default=45,help="min sep
 parser.add_argument("--sm-lambda",type=float,default=0.006,help="smoothing lambda")
 parser.add_argument("--model", type=str, default="default", choices=['default', 'opdt', 'csa', 'csd'], help="model to use")
 parser.add_argument("--dg", type=str, default="boot", choices=['boot', 'prob', 'ptt'], help="direction getting scheme to use")
+parser.add_argument("--cache-dir", type=str, default='', help="cache directory for FA and ODFs")
 
 args = parser.parse_args()
 
@@ -173,11 +175,19 @@ else:
   roi_data = roi.get_fdata()
   mask = mask.get_fdata()
 
-tenmodel = dti.TensorModel(gtab, fit_method='WLS')
-print('Fitting Tensor')
-tenfit = tenmodel.fit(data, mask=mask)
-print('Computing anisotropy measures (FA,MD,RGB)')
-FA = tenfit.fa
+
+fa_cache_file = op.join(args.cache_dir, "fa.npy")
+if args.cache_dir != '' and op.exists(fa_cache_file):
+    print("Loading FA from cache")
+    FA = np.load(fa_cache_file)
+else:
+    tenmodel = dti.TensorModel(gtab, fit_method='WLS')
+    print('Fitting Tensor')
+    tenfit = tenmodel.fit(data, mask=mask)
+    print('Computing anisotropy measures (FA,MD,RGB)')
+    FA = tenfit.fa
+    if args.cache_dir != '':
+      np.save(fa_cache_file, FA)
 
 # Setup tissue_classifier args
 tissue_classifier = ThresholdStoppingCriterion(FA, args.fa_threshold)
@@ -216,24 +226,32 @@ elif args.model == "csa":
       sh_lambda=args.sm_lambda,
       min_signal=args.min_signal)
 else:
-  print("Running CSD model...")
-  unique_bvals = unique_bvals_magnitude(gtab.bvals)
-  if len(unique_bvals[unique_bvals > 0]) > 1:
-    low_shell_idx = gtab.bvals <= unique_bvals[unique_bvals > 0][0]
-    response_gtab = gradient_table( # reinit as single shell for this CSD
-      gtab.bvals[low_shell_idx],
-      gtab.bvecs[low_shell_idx])
-    data = data[..., low_shell_idx]
+  csd_odf_cache_file = op.join(args.cache_dir, "csd_odf.npy")
+  if args.cache_dir != '' and op.exists(csd_odf_cache_file):
+      print("Loading CSD ODF from cache")
+      data = np.load(csd_odf_cache_file)
   else:
-    response_gtab = gtab
-  response, _ = auto_response_ssst(
-    response_gtab,
-    data,
-    roi_radii=10,
-    fa_thr=0.7)
-  model = ConstrainedSphericalDeconvModel(response_gtab, response, sh_order=args.sh_order)
-  fit = model.fit(data, mask=(FA >= args.fa_threshold))
-  data = fit.odf(sphere).clip(min=0)
+    print("Running CSD model...")
+    unique_bvals = unique_bvals_magnitude(gtab.bvals)
+    if len(unique_bvals[unique_bvals > 0]) > 1:
+      low_shell_idx = gtab.bvals <= unique_bvals[unique_bvals > 0][0]
+      response_gtab = gradient_table( # reinit as single shell for this CSD
+        gtab.bvals[low_shell_idx],
+        gtab.bvecs[low_shell_idx])
+      data = data[..., low_shell_idx]
+    else:
+      response_gtab = gtab
+    response, _ = auto_response_ssst(
+      response_gtab,
+      data,
+      roi_radii=10,
+      fa_thr=0.7)
+    model = ConstrainedSphericalDeconvModel(response_gtab, response, sh_order=args.sh_order)
+    fit = model.fit(data, mask=(FA >= args.fa_threshold))
+    data = fit.odf(sphere).clip(min=0)
+
+    if args.cache_dir != '':
+        np.save(csd_odf_cache_file, data)
   if args.dg == "ptt":
       if args.device == "cpu":
           dg = cpu_PTTDirectionGetter()

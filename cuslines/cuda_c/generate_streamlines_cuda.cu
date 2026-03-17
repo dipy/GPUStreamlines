@@ -36,6 +36,7 @@
 #include "utils.cu"
 #include "tracking_helpers.cu"
 #include "boot.cu"
+#include "ptt_init.cu"
 #include "ptt.cu"
 
 #define MAX_NUM_DIR (128)
@@ -292,6 +293,7 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
 template<int BDIM_X,
          int BDIM_Y,
          ModelType MODEL_T,
+         typename DATA_T,
          typename REAL_T,
          typename REAL3_T>
 __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
@@ -308,7 +310,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                          const int dimy,
                          const int dimz,
                          const int dimt,
-                         const REAL_T *__restrict__ dataf,
+                         DATA_T dataf,
                          const REAL_T *__restrict__ metric_map,
 		         const int samplm_nr,
                          const REAL3_T *__restrict__ sphere_vertices,
@@ -511,6 +513,7 @@ __global__ void getNumStreamlinesProb_k(const REAL_T max_angle,
 template<int BDIM_X,
          int BDIM_Y,
          ModelType MODEL_T,
+         typename DATA_T,
          typename REAL_T,
          typename REAL3_T>
 __global__ void genStreamlinesMergeProb_k(
@@ -527,7 +530,7 @@ __global__ void genStreamlinesMergeProb_k(
                                       const int dimy,
                                       const int dimz,
                                       const int dimt,
-                                      const REAL_T *__restrict__ dataf,
+                                      DATA_T dataf,
                                       const REAL_T *__restrict__ metric_map,
 				      const int samplm_nr,
                                       const REAL3_T *__restrict__ sphere_vertices,
@@ -617,7 +620,8 @@ __global__ void genStreamlinesMergeProb_k(
                 int stepsB;
                 const int tissue_classB = tracker_d<BDIM_X,
                                                     BDIM_Y,
-                                                    MODEL_T>(&st,
+                                                    MODEL_T,
+                                                    DATA_T>(&st,
 		                		             max_angle,
 			        			     tc_threshold,
 	                        			     step_size,
@@ -651,7 +655,8 @@ __global__ void genStreamlinesMergeProb_k(
                 int stepsF;
                 const int tissue_classF = tracker_d<BDIM_X,
                                                     BDIM_Y,
-                                                    MODEL_T>(&st,
+                                                    MODEL_T,
+                                                    DATA_T>(&st,
      	                    			             max_angle,
 		        				     tc_threshold,
 	                				     step_size,

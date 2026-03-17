@@ -41,7 +41,7 @@ class GPUDirectionGetter(ABC):
     def deallocate_on_gpu(self, n):
         pass
 
-    def compile_program(self, debug: bool = False):
+    def compile_program(self, debug: bool = True):
         start_time = time()
         logger.info("Compiling GPUStreamlines")
 
@@ -322,7 +322,7 @@ class ProbDirectionGetter(GPUDirectionGetter):
     def __init__(self):
         checkCudaErrors(driver.cuInit(0))
         self.getnum_kernel_name = f"getNumStreamlinesProb_k<{THR_X_SL},{BLOCK_Y},{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
-        self.genstreamlines_kernel_name = f"genStreamlinesMergeProb_k<{THR_X_SL},{BLOCK_Y},PROB,{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
+        self.genstreamlines_kernel_name = f"genStreamlinesMergeProb_k<{THR_X_SL},{BLOCK_Y},PROB,const REAL_T *__restrict__,{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
         self.compile_program()
 
     def getNumStreamlines(self, n, nseeds_gpu, block, grid, sp):
@@ -397,8 +397,8 @@ class ProbDirectionGetter(GPUDirectionGetter):
 class PttDirectionGetter(ProbDirectionGetter):
     def __init__(self):
         checkCudaErrors(driver.cuInit(0))
-        self.getnum_kernel_name = f"getNumStreamlinesProb_k<{THR_X_SL},{BLOCK_Y},{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
-        self.genstreamlines_kernel_name = f"genStreamlinesMergeProb_k<{THR_X_SL},{BLOCK_Y},PTT,{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
+        self.getnum_kernel_name = f"getNumStreamlinesPtt_k<{THR_X_SL},{BLOCK_Y},{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
+        self.genstreamlines_kernel_name = f"genStreamlinesMergeProb_k<{THR_X_SL},{BLOCK_Y},PTT,const cudaTextureObject_t,{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
         self.compile_program()
 
     def _shared_mem_bytes(self, sp):

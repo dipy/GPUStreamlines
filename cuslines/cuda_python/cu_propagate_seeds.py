@@ -204,10 +204,6 @@ class SeedBatchPropagator:
         self.nSlines_old = self.nSlines
         self.gpu_tracker.rng_offset += self.nseeds
 
-    # TODO: performance: better queuing/batching of seeds,
-    # if more performance needed,
-    # given exponential nature of streamlines
-    # May be better to do in cuda code directly
     def propagate(self, seeds):
         self.nseeds = len(seeds)
         self.nseeds_per_gpu = (

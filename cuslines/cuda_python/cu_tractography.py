@@ -15,13 +15,14 @@ from cuslines.cuda_python.cutils import (
 from cuslines.cuda_python.cu_direction_getters import (
     GPUDirectionGetter,
     BootDirectionGetter,
+    PttDirectionGetter,
 )
 from cuslines.cuda_python.cu_propagate_seeds import SeedBatchPropagator
 
 from trx.trx_file_memmap import TrxFile
 
 from nibabel.streamlines.tractogram import Tractogram
-from nibabel.streamlines.array_sequence import ArraySequence, MEGABYTE
+from nibabel.streamlines.array_sequence import ArraySequence
 
 from dipy.io.stateful_tractogram import Space, StatefulTractogram
 
@@ -137,6 +138,7 @@ class GPUTracker:
         logger.info("Creating GPUTracker with %d GPUs...", self.ngpus)
 
         self.dataf_d = []
+        self.dataf_array = []
         self.metric_map_d = []
         self.sphere_vertices_d = []
         self.sphere_edges_d = []
@@ -155,6 +157,61 @@ class GPUTracker:
         self._allocate()
         return self
 
+    def _allocate_texture(self):
+        if REAL_SIZE != 4:
+            raise ValueError((
+                "PTT on CUDA uses texture memory "
+                "which only supports 32-bit floats"))
+
+        channelDesc = runtime.cudaCreateChannelDesc(
+            32, 0, 0, 0,
+            runtime.cudaChannelFormatKindFloat
+        )       
+        # TODO: test each way 
+        if False:
+            extent = runtime.make_cudaExtent(self.dimt * self.dimx, self.dimy, self.dimz)
+            dataf_array = checkCudaErrors(runtime.cudaMalloc3DArray(channelDesc, extent))
+
+
+            data_f_rearranged = np.transpose(self.dataf, (3, 0, 1, 2)).reshape((self.dimt * self.dimx, self.dimy, self.dimz))
+            data_f_rearranged = np.ascontiguousarray(data_f_rearranged, dtype=REAL_DTYPE)
+            copyParams = runtime.cudaMemcpy3DParms()
+            copyParams.srcPtr = runtime.make_cudaPitchedPtr(
+                data_f_rearranged.ctypes.data,
+                self.dimt * self.dimx * REAL_SIZE,
+                self.dimt * self.dimx,
+                self.dimy)
+        else:
+            extent = runtime.make_cudaExtent(self.dimx, self.dimy, self.dimz * self.dimt)
+            dataf_array = checkCudaErrors(runtime.cudaMalloc3DArray(channelDesc, extent))
+    
+            copyParams = runtime.cudaMemcpy3DParms()
+            copyParams.srcPtr = runtime.make_cudaPitchedPtr(
+                self.dataf.ctypes.data,
+                self.dimx * REAL_SIZE,
+                self.dimx,
+                self.dimy
+            )
+        copyParams.dstArray = dataf_array
+        copyParams.extent = extent
+        copyParams.kind = runtime.cudaMemcpyHostToDevice
+        checkCudaErrors(runtime.cudaMemcpy3D(copyParams))
+
+        resDesc = runtime.cudaResourceDesc()
+        resDesc.resType = runtime.cudaResourceTypeArray
+        resDesc.res.array.array = dataf_array
+
+        texDesc = runtime.cudaTextureDesc()
+        texDesc.addressMode[0] = runtime.cudaAddressModeClamp
+        texDesc.addressMode[1] = runtime.cudaAddressModeClamp
+        texDesc.addressMode[2] = runtime.cudaAddressModeClamp
+        texDesc.filterMode = runtime.cudaFilterModeLinear
+        texDesc.readMode = runtime.cudaReadModeElementType
+        texDesc.normalizedCoords = 0
+
+        texObj = checkCudaErrors(runtime.cudaCreateTextureObject(resDesc, texDesc, None))
+        return texObj, dataf_array
+
     def _allocate(self):
         if self._allocated:
             return
@@ -171,9 +228,23 @@ class GPUTracker:
             checkCudaErrors(runtime.cudaSetDevice(ii))
 
             # TODO: performance: dataf could be managed or texture memory instead?
-            self.dataf_d.append(
-                checkCudaErrors(runtime.cudaMalloc(REAL_SIZE * self.dataf.size))
-            )
+            if isinstance(self.dg, PttDirectionGetter):
+                dataf_d, dataf_array = self._allocate_texture()
+                self.dataf_d.append(dataf_d)
+                self.dataf_array.append(dataf_array)
+            else:
+                self.dataf_d.append(
+                    checkCudaErrors(runtime.cudaMalloc(REAL_SIZE * self.dataf.size))
+                )
+                checkCudaErrors(
+                    runtime.cudaMemcpy(
+                        self.dataf_d[ii],
+                        self.dataf.ctypes.data,
+                        REAL_SIZE * self.dataf.size,
+                        cudaMemcpyKind.cudaMemcpyHostToDevice,
+                    )
+                )
+
             self.metric_map_d.append(
                 checkCudaErrors(runtime.cudaMalloc(REAL_SIZE * self.metric_map.size))
             )
@@ -188,14 +259,6 @@ class GPUTracker:
                 )
             )
 
-            checkCudaErrors(
-                runtime.cudaMemcpy(
-                    self.dataf_d[ii],
-                    self.dataf.ctypes.data,
-                    REAL_SIZE * self.dataf.size,
-                    cudaMemcpyKind.cudaMemcpyHostToDevice,
-                )
-            )
             checkCudaErrors(
                 runtime.cudaMemcpy(
                     self.metric_map_d[ii],
@@ -229,8 +292,14 @@ class GPUTracker:
 
         for n in range(self.ngpus):
             checkCudaErrors(runtime.cudaSetDevice(n))
-            if self.dataf_d[n]:
-                checkCudaErrors(runtime.cudaFree(self.dataf_d[n]))
+            if isinstance(self.dg, PttDirectionGetter):
+                if self.dataf_d[n]:
+                    checkCudaErrors(runtime.cudaDestroyTextureObject(self.dataf_d[n]))
+                if self.dataf_array[n]:
+                    checkCudaErrors(runtime.cudaFreeArray(self.dataf_array[n]))
+            else:
+                if self.dataf_d[n]:
+                    checkCudaErrors(runtime.cudaFree(self.dataf_d[n]))
             if self.metric_map_d[n]:
                 checkCudaErrors(runtime.cudaFree(self.metric_map_d[n]))
             if self.sphere_vertices_d[n]:
