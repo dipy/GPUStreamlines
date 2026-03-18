@@ -85,8 +85,6 @@
 
 #define EXCESS_ALLOC_FACT 2
 
-#define NORM_EPS ((REAL)1e-8)
-
 #if 0
   #define DEBUG
 #endif

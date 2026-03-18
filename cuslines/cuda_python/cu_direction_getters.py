@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.spatial import KDTree
 from abc import ABC, abstractmethod
 import logging
 from importlib.resources import files
@@ -322,7 +323,7 @@ class ProbDirectionGetter(GPUDirectionGetter):
     def __init__(self):
         checkCudaErrors(driver.cuInit(0))
         self.getnum_kernel_name = f"getNumStreamlinesProb_k<{THR_X_SL},{BLOCK_Y},{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
-        self.genstreamlines_kernel_name = f"genStreamlinesMergeProb_k<{THR_X_SL},{BLOCK_Y},PROB,const REAL_T *__restrict__,{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
+        self.genstreamlines_kernel_name = f"genStreamlinesMergeProb_k<{THR_X_SL},{BLOCK_Y},PROB,const {REAL_DTYPE_AS_STR} *__restrict__,{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
         self.compile_program()
 
     def getNumStreamlines(self, n, nseeds_gpu, block, grid, sp):
@@ -360,18 +361,10 @@ class ProbDirectionGetter(GPUDirectionGetter):
             sp.slinesOffs_d[n],
         )
 
-    def _shared_mem_bytes(self, sp):
-        return REAL_SIZE * BLOCK_Y * sp.gpu_tracker.n32dimt
-
     def generateStreamlines(self, n, nseeds_gpu, block, grid, sp):
         ker = self.module.get_kernel(self.genstreamlines_kernel_name)
-        shared_memory = self._shared_mem_bytes(sp)
+        shared_memory = REAL_SIZE * BLOCK_Y * sp.gpu_tracker.n32dimt
         config = LaunchConfig(block=block, grid=grid, shmem_size=shared_memory)
-
-        if isinstance(sp.gpu_tracker.dataf_d[n], runtime.cudaTextureObject_t):
-            dataf_d_n = sp.gpu_tracker.dataf_d[n].getPtr()
-        else:
-            dataf_d_n = sp.gpu_tracker.dataf_d[n]
 
         launch(
             sp.gpu_tracker.streams[n],
@@ -390,7 +383,7 @@ class ProbDirectionGetter(GPUDirectionGetter):
             sp.gpu_tracker.dimy,
             sp.gpu_tracker.dimz,
             sp.gpu_tracker.dimt,
-            dataf_d_n,
+            sp.gpu_tracker.dataf_d[n],
             sp.gpu_tracker.metric_map_d[n],
             sp.gpu_tracker.samplm_nr,
             sp.gpu_tracker.sphere_vertices_d[n],
@@ -405,11 +398,124 @@ class ProbDirectionGetter(GPUDirectionGetter):
 
 
 class PttDirectionGetter(ProbDirectionGetter):
-    def __init__(self):
+    def __init__(self, odf_lut_res: int = 128):
         checkCudaErrors(driver.cuInit(0))
         self.getnum_kernel_name = f"getNumStreamlinesPtt_k<{THR_X_SL},{BLOCK_Y},{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
         self.genstreamlines_kernel_name = f"genStreamlinesMergeProb_k<{THR_X_SL},{BLOCK_Y},PTT,const cudaTextureObject_t *__restrict__,{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
         self.compile_program()
+        self.odf_lut_res = odf_lut_res
+        self.sphere_vertices_lut_h = None
+        self.sphere_vertices_lut_d = []
+        self.sphere_vertices_lut_array_d = []
 
-    def _shared_mem_bytes(self, sp):
-        return 0
+    def allocate_on_gpu(self, n):
+        if REAL_SIZE != 4:
+            raise ValueError((
+                "PTT on CUDA uses texture memory "
+                "which only supports 32-bit floats"))
+
+        channelDesc = checkCudaErrors(runtime.cudaCreateChannelDesc(
+            32, 0, 0, 0,
+            runtime.cudaChannelFormatKind.cudaChannelFormatKindFloat
+        ))
+        extent = runtime.make_cudaExtent(self.odf_lut_res, self.odf_lut_res, self.odf_lut_res)
+        sphere_vertices_array = checkCudaErrors(runtime.cudaMalloc3DArray(channelDesc, extent, 0))
+
+        copyParams = runtime.cudaMemcpy3DParms()
+        copyParams.srcPtr = runtime.make_cudaPitchedPtr(
+            self.sphere_vertices_lut_h.ctypes.data,
+            self.odf_lut_res * 4,
+            self.odf_lut_res,
+            self.odf_lut_res)
+
+        copyParams.dstArray = sphere_vertices_array
+        copyParams.extent = extent
+        copyParams.kind = cudaMemcpyKind.cudaMemcpyHostToDevice
+        checkCudaErrors(runtime.cudaMemcpy3D(copyParams))
+
+        resDesc = runtime.cudaResourceDesc()
+        resDesc.resType = runtime.cudaResourceType.cudaResourceTypeArray
+        resDesc.res.array.array = sphere_vertices_array
+
+        texDesc = runtime.cudaTextureDesc()
+        texDesc.addressMode[0] = runtime.cudaTextureAddressMode.cudaAddressModeClamp
+        texDesc.addressMode[1] = runtime.cudaTextureAddressMode.cudaAddressModeClamp
+        texDesc.addressMode[2] = runtime.cudaTextureAddressMode.cudaAddressModeClamp
+        texDesc.filterMode = runtime.cudaTextureFilterMode.cudaFilterModePoint
+        texDesc.readMode = runtime.cudaTextureReadMode.cudaReadModeElementType
+        texDesc.normalizedCoords = 1
+
+        texObj = checkCudaErrors(runtime.cudaCreateTextureObject(resDesc, texDesc, None))
+        self.sphere_vertices_lut_d.append(texObj)
+        self.sphere_vertices_lut_array_d.append(sphere_vertices_array)
+
+    def deallocate_on_gpu(self, n):
+        if self.sphere_vertices_lut_d[n]:
+            checkCudaErrors(runtime.cudaDestroyTextureObject(self.sphere_vertices_lut_d[n]))
+        if self.sphere_vertices_lut_array_d[n]:
+            checkCudaErrors(runtime.cudaFreeArray(self.sphere_vertices_lut_array_d[n]))
+
+    def prepare_data(self, dataf, stop_map, stop_threshold, sphere_vertices):
+        dimx, dimy, dimz, dimt = dataf.shape
+        dataf = dataf.clip(min=0)
+
+        # zeros outside of tracking mask helps with probing
+        dataf[stop_map < stop_threshold, :] = 0
+
+        # normalize ODFs to max of 1
+        odf_sums = dataf.max(axis=3, keepdims=True)
+        nonzero_mask = odf_sums > 0
+        np.divide(dataf, odf_sums, out=dataf, where=nonzero_mask)
+
+        # This rearrangement is for cuda texture memory
+        data_f_rearranged = dataf.transpose(2, 1, 3, 0).reshape(dimz, dimy, dimt * dimx)
+        data_f_rearranged = np.ascontiguousarray(data_f_rearranged, dtype=np.float32)
+
+        # Generate a 3D LUT that maps each point in a 128x128x128 grid to
+        # the index of the closest sphere vertex
+        coords = np.linspace(-1, 1, self.odf_lut_res)
+        grid_x, grid_y, grid_z = np.meshgrid(coords, coords, coords, indexing='ij')
+        grid_points = np.stack([grid_x.ravel(), grid_y.ravel(), grid_z.ravel()], axis=1)
+
+        tree = KDTree(sphere_vertices)
+        _, closest_indices = tree.query(grid_points)
+        lut = closest_indices.reshape((self.odf_lut_res, self.odf_lut_res, self.odf_lut_res))
+        lut = np.ascontiguousarray(lut, dtype=np.float32)
+        self.sphere_vertices_lut_h = lut
+
+        return data_f_rearranged
+
+    def generateStreamlines(self, n, nseeds_gpu, block, grid, sp):
+        ker = self.module.get_kernel(self.genstreamlines_kernel_name)
+        shared_memory = 0
+        config = LaunchConfig(block=block, grid=grid, shmem_size=shared_memory)
+
+        launch(
+            sp.gpu_tracker.streams[n],
+            config,
+            ker,
+            sp.gpu_tracker.max_angle,
+            sp.gpu_tracker.tc_threshold,
+            sp.gpu_tracker.step_size,
+            sp.gpu_tracker.relative_peak_thresh,
+            sp.gpu_tracker.min_separation_angle,
+            sp.gpu_tracker.rng_seed,
+            sp.gpu_tracker.rng_offset + n * nseeds_gpu,
+            nseeds_gpu,
+            sp.seeds_d[n],
+            sp.gpu_tracker.dimx,
+            sp.gpu_tracker.dimy,
+            sp.gpu_tracker.dimz,
+            sp.gpu_tracker.dimt,
+            sp.gpu_tracker.dataf_d[n].getPtr(),
+            sp.gpu_tracker.metric_map_d[n],
+            sp.gpu_tracker.samplm_nr,
+            self.sphere_vertices_lut_d[n].getPtr(),
+            sp.gpu_tracker.sphere_edges_d[n],
+            sp.gpu_tracker.nedges,
+            sp.slinesOffs_d[n],
+            sp.shDirTemp0_d[n],
+            sp.slineSeed_d[n],
+            sp.slineLen_d[n],
+            sp.sline_d[n],
+        )

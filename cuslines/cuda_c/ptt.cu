@@ -1,19 +1,17 @@
-template<typename REAL_T>
-__device__ __forceinline__ void norm3_d(REAL_T *num, int fail_ind) {
-    const REAL_T scale = SQRT(num[0] * num[0] + num[1] * num[1] + num[2] * num[2]);
+__device__ __forceinline__ void norm3_d(float *num, int fail_ind) {
+    const float inv_scale = rnorm3df(num[0], num[1], num[2]);
 
-    if (scale > NORM_EPS) {
-        num[0] /= scale;
-        num[1] /= scale;
-        num[2] /= scale;
+    if (inv_scale < PTT_INV_NORM_EPS) {
+        num[0] *= inv_scale;
+        num[1] *= inv_scale;
+        num[2] *= inv_scale;
     } else {
         num[0] = num[1] = num[2] = 0;
         num[fail_ind] = 1.0; // this can happen randomly during propogation, though is exceedingly rare
     }
 }
 
-template<typename REAL_T>
-__device__ __forceinline__ void crossnorm3_d(REAL_T *dest, const REAL_T *src1, const REAL_T *src2, int fail_ind) {
+__device__ __forceinline__ void crossnorm3_d(float *dest, const float *src1, const float *src2, int fail_ind) {
     dest[0] = src1[1] * src2[2] - src1[2] * src2[1];
     dest[1] = src1[2] * src2[0] - src1[0] * src2[2];
     dest[2] = src1[0] * src2[1] - src1[1] * src2[0];
@@ -21,32 +19,23 @@ __device__ __forceinline__ void crossnorm3_d(REAL_T *dest, const REAL_T *src1, c
     norm3_d(dest, fail_ind);
 }
 
-template<typename REAL_T, typename REAL3_T>
-__device__ REAL_T interp4_d(const REAL3_T pos, const REAL_T* frame,
-                            const cudaTextureObject_t *__restrict__ pmf,
-                            const int dimx, const int dimt,
-                            const REAL3_T *__restrict__ odf_sphere_vertices) {
-    int closest_odf_idx = 0;
-    REAL_T __max_cos = REAL_T(0);
+__device__ float interp4_d(const float3 pos, const float* frame,
+                           const cudaTextureObject_t *__restrict__ pmf,
+                           const cudaTextureObject_t *__restrict__ sphere_vertices_lut,
+                           const int dimx) {
+    float3 uvw = {  // Map from -1,1 to 0,1 for texture lookup
+        fmaf(frame[0], 0.5f, 0.5f),
+        fmaf(frame[1], 0.5f, 0.5f),
+        fmaf(frame[2], 0.5f, 0.5f)
+    };
+    const float closest_odf_idx = tex3D<float>(*sphere_vertices_lut, uvw.z, uvw.y, uvw.x);
 
-    for (int ii = 0; ii < dimt; ii++) {
-        REAL_T cos_sim = FABS(
-            odf_sphere_vertices[ii].x * frame[0] \
-            + odf_sphere_vertices[ii].y * frame[1] \
-            + odf_sphere_vertices[ii].z * frame[2]);
-        if (cos_sim > __max_cos) {
-            __max_cos = cos_sim;
-            closest_odf_idx = ii;
-        }
-    }
-
-    REAL_T x_query = (REAL_T)(closest_odf_idx*dimx) + pos.x;
-    return tex3D<REAL_T>(*pmf, x_query, pos.y, pos.z);
+    float x_query = (float)(closest_odf_idx * dimx) + pos.x;
+    return tex3D<float>(*pmf, x_query, pos.y, pos.z);
 }
 
-template<typename REAL_T>
-__device__ void prepare_propagator_d(REAL_T k1, REAL_T k2, REAL_T arclength,
-                                     REAL_T *propagator) {
+__device__ void prepare_propagator_d(float k1, float k2, float arclength,
+                                     float *propagator) {
     if ((FABS(k1) < K_SMALL) && (FABS(k2) < K_SMALL)) {
         propagator[0] = arclength;
         propagator[1] = 0;
@@ -64,10 +53,10 @@ __device__ void prepare_propagator_d(REAL_T k1, REAL_T k2, REAL_T arclength,
         if (FABS(k2) < K_SMALL) {
             k2 = K_SMALL;
         }
-        const REAL_T k     = SQRT(k1*k1+k2*k2);
-        const REAL_T sinkt = SIN(k*arclength);
-        const REAL_T coskt = COS(k*arclength);
-        const REAL_T kk    = 1/(k*k);
+        const float k     = SQRT(k1*k1+k2*k2);
+        const float sinkt = SIN(k*arclength);
+        const float coskt = COS(k*arclength);
+        const float kk    = 1/(k*k);
 
         propagator[0] = sinkt/k;
         propagator[1] = k1*(1-coskt)*kk;
@@ -81,26 +70,25 @@ __device__ void prepare_propagator_d(REAL_T k1, REAL_T k2, REAL_T arclength,
     }
 }
 
-template<typename REAL_T>
-__device__ void random_normal(curandStatePhilox4_32_10_t *st, REAL_T* probing_frame) {
+__device__ void random_normal(curandStatePhilox4_32_10_t *st, float* probing_frame) {
     probing_frame[3] = curand_normal(st);
     probing_frame[4] = curand_normal(st);
     probing_frame[5] = curand_normal(st);
-    REAL_T dot = probing_frame[3]*probing_frame[0]
+    float dot = probing_frame[3]*probing_frame[0]
         + probing_frame[4]*probing_frame[1]
         + probing_frame[5]*probing_frame[2];
 
     probing_frame[3] -= dot*probing_frame[0];
     probing_frame[4] -= dot*probing_frame[1];
     probing_frame[5] -= dot*probing_frame[2];
-    REAL_T n2 = probing_frame[3]*probing_frame[3]
+    float n2 = probing_frame[3]*probing_frame[3]
         + probing_frame[4]*probing_frame[4]
         + probing_frame[5]*probing_frame[5];
 
-    if (n2 < NORM_EPS) {
-        REAL_T abs_x = FABS(probing_frame[0]);
-        REAL_T abs_y = FABS(probing_frame[1]);
-        REAL_T abs_z = FABS(probing_frame[2]);
+    if (n2 < PTT_NORM_EPS) {
+        float abs_x = FABS(probing_frame[0]);
+        float abs_y = FABS(probing_frame[1]);
+        float abs_z = FABS(probing_frame[2]);
 
         if (abs_x <= abs_y && abs_x <= abs_z) {
             probing_frame[3] = 0.0;
@@ -120,8 +108,8 @@ __device__ void random_normal(curandStatePhilox4_32_10_t *st, REAL_T* probing_fr
     }
 }
 
-template<bool IS_INIT, typename REAL_T>
-__device__ void get_probing_frame_d(const REAL_T* frame, curandStatePhilox4_32_10_t *st, REAL_T* probing_frame) {
+template<bool IS_INIT>
+__device__ void get_probing_frame_d(const float* frame, curandStatePhilox4_32_10_t *st, float* probing_frame) {
     if (IS_INIT) {
         for (int ii = 0; ii < 3; ii++) { // tangent
             probing_frame[ii] = frame[ii];
@@ -140,9 +128,8 @@ __device__ void get_probing_frame_d(const REAL_T* frame, curandStatePhilox4_32_1
     }
 }
 
-template<typename REAL_T>
-__device__ void propagate_frame_d(REAL_T* propagator, REAL_T* frame, REAL_T* direc) {
-    REAL_T __tmp[3];
+__device__ void propagate_frame_d(float* propagator, float* frame, float* direc) {
+    float __tmp[3];
 
     for (int ii = 0; ii < 3; ii++) {
         direc[ii]       = propagator[0]*frame[ii] + propagator[1]*frame[3+ii] + propagator[2]*frame[6+ii];
@@ -159,20 +146,18 @@ __device__ void propagate_frame_d(REAL_T* propagator, REAL_T* frame, REAL_T* dir
     }
 }
 
-template<typename REAL_T, typename REAL3_T>
-__device__ REAL_T calculate_data_support_d(REAL_T support,
-                                           const REAL3_T pos, const cudaTextureObject_t *__restrict__ pmf,
+__device__ float calculate_data_support_d(float support,
+                                           const float3 pos, const cudaTextureObject_t *__restrict__ pmf,
                                            const int dimx, const int dimt,
-                                           const REAL_T probe_step_size,
-                                           const REAL_T absolpmf_thresh,
-                                           const REAL3_T *__restrict__ odf_sphere_vertices,
-                                           REAL_T k1, REAL_T k2,
-                                           REAL_T* probing_frame) {
+                                           const float probe_step_size,
+                                           const float absolpmf_thresh,
+                                           const cudaTextureObject_t *__restrict__ sphere_vertices_lut,
+                                           float k1, float k2,
+                                           float* probing_frame) {
     
-    REAL_T probing_prop[9];
-    REAL_T direc[3];
-    REAL3_T probing_pos;
-    REAL_T fod_amp;
+    float probing_prop[9];
+    float direc[3];
+    float3 probing_pos;
     prepare_propagator_d(
         k1, k2,
         probe_step_size, probing_prop);
@@ -190,10 +175,9 @@ __device__ REAL_T calculate_data_support_d(REAL_T support,
         probing_pos.y += direc[1];
         probing_pos.z += direc[2];
 
-        const REAL_T fod_amp = interp4_d( // This is the most expensive call
+        const float fod_amp = interp4_d( // This is the most expensive call
             probing_pos, probing_frame, pmf,
-            dimx, dimt,
-            odf_sphere_vertices);
+            sphere_vertices_lut, dimx);
 
         if (!ALLOW_WEAK_LINK && (fod_amp < absolpmf_thresh)) {
             return 0;
@@ -205,20 +189,18 @@ __device__ REAL_T calculate_data_support_d(REAL_T support,
 
 template<int BDIM_X,
          int BDIM_Y,
-         bool IS_INIT,
-         typename REAL_T,
-         typename REAL3_T>
+         bool IS_INIT>
 __device__ int get_direction_ptt_d(
     curandStatePhilox4_32_10_t *st,
     const cudaTextureObject_t *__restrict__ pmf,
-    const REAL_T max_angle,
-    const REAL_T step_size,
-    REAL3_T dir,
-    REAL_T *__frame_sh,
+    const float max_angle,
+    const float step_size,
+    float3 dir,
+    float *__frame_sh,
     const int dimx, const int dimy, const int dimz, const int dimt,
-    REAL3_T pos,
-    const REAL3_T *__restrict__ odf_sphere_vertices,
-    REAL3_T *__restrict__ dirs) {
+    float3 pos,
+    const cudaTextureObject_t *__restrict__ sphere_vertices_lut,
+    float3 *__restrict__ dirs) {
     // Aydogan DB, Shi Y. Parallel Transport Tractography. IEEE Trans
     // Med Imaging. 2021 Feb;40(2):635-647. doi: 10.1109/TMI.2020.3034038.
     // Epub 2021 Feb 2. PMID: 33104507; PMCID: PMC7931442.
@@ -233,15 +215,15 @@ __device__ int get_direction_ptt_d(
     const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
     const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
 
-	__shared__ REAL_T face_cdf_sh[BDIM_Y*DISC_FACE_CNT];
-    __shared__ REAL_T vert_pdf_sh[BDIM_Y*DISC_VERT_CNT];
+	__shared__ float face_cdf_sh[BDIM_Y*DISC_FACE_CNT];
+    __shared__ float vert_pdf_sh[BDIM_Y*DISC_VERT_CNT];
 
-    REAL_T *__face_cdf_sh = face_cdf_sh + tidy*DISC_FACE_CNT;
-    REAL_T *__vert_pdf_sh = vert_pdf_sh + tidy*DISC_VERT_CNT;
+    float *__face_cdf_sh = face_cdf_sh + tidy*DISC_FACE_CNT;
+    float *__vert_pdf_sh = vert_pdf_sh + tidy*DISC_VERT_CNT;
 
-    const REAL_T probe_step_size = ((step_size / PROBE_FRAC) / (PROBE_QUALITY - 1));  // TODO: is this -1 necessary?
-    const REAL_T max_curvature = 2.0 * SIN(max_angle / 2.0) / (step_size / PROBE_FRAC); // This seems to work well
-    const REAL_T absolpmf_thresh = 0; // PMF_THRESHOLD_P * max_d<BDIM_X>(dimt, pmf, REAL_MIN); TODO: try 2.84 for max; i mean, this is completely broken
+    const float probe_step_size = ((step_size / PROBE_FRAC) / (PROBE_QUALITY));
+    const float max_curvature = PROBE_FRAC * 2.0 * SIN(max_angle / 2.0) / (step_size);
+    const float absolpmf_thresh = PMF_THRESHOLD_P;
 
 #if 0
         printf("absolpmf_thresh: %f, max_curvature: %f, probe_step_size: %f\n", absolpmf_thresh, max_curvature, probe_step_size);
@@ -249,7 +231,7 @@ __device__ int get_direction_ptt_d(
         printf("step_size: %f\n", step_size);
 #endif
 
-    REAL_T __tmp;
+    float __tmp;
 
     __syncwarp(WMASK);
     if (IS_INIT) {
@@ -260,15 +242,14 @@ __device__ int get_direction_ptt_d(
         }
     }
 
-    const REAL_T first_val = interp4_d(
+    const float first_val = interp4_d(
         pos, __frame_sh, pmf,
-        dimx, dimt,
-        odf_sphere_vertices);
+        sphere_vertices_lut, dimx);
     __syncwarp(WMASK);
 
     // Calculate __vert_pdf_sh
-    REAL_T probing_frame[9];
-    REAL_T k1_probe, k2_probe;
+    float probing_frame[9];
+    float k1_probe, k2_probe;
     bool support_found = 0;
     for (int ii = tidx; ii < DISC_VERT_CNT; ii += BDIM_X) {
         k1_probe = DISC_VERT[ii*2] * max_curvature;
@@ -276,12 +257,12 @@ __device__ int get_direction_ptt_d(
 
         get_probing_frame_d<IS_INIT>(__frame_sh, st, probing_frame);
 
-        const REAL_T this_support = calculate_data_support_d(
+        const float this_support = calculate_data_support_d(
             first_val,
             pos, pmf, dimx, dimt,
             probe_step_size,
             absolpmf_thresh,
-            odf_sphere_vertices,
+            sphere_vertices_lut,
             k1_probe, k2_probe,
             probing_frame);
 
@@ -321,7 +302,7 @@ __device__ int get_direction_ptt_d(
     for (int ii = tidx; ii < DISC_FACE_CNT; ii+=BDIM_X) {
         bool all_verts_valid = 1;
         for (int jj = 0; jj < 3; jj++) {
-            REAL_T vert_val = __vert_pdf_sh[DISC_FACE[ii*3 + jj]];
+            float vert_val = __vert_pdf_sh[DISC_FACE[ii*3 + jj]];
             if (vert_val == 0) {
                 all_verts_valid = IS_INIT; // On init, even go with faces that are not fully supported
             }
@@ -343,7 +324,7 @@ __device__ int get_direction_ptt_d(
 
     // Prefix sum __face_cdf_sh and return 0 if all 0
     prefix_sum_sh_d<BDIM_X>(__face_cdf_sh, DISC_FACE_CNT);
-    REAL_T last_cdf = __face_cdf_sh[DISC_FACE_CNT - 1];
+    float last_cdf = __face_cdf_sh[DISC_FACE_CNT - 1];
 
     if (last_cdf == 0) {
         return 0;
@@ -358,7 +339,7 @@ __device__ int get_direction_ptt_d(
 #endif
 
     // Sample random valid faces randomly
-    REAL_T r1, r2;
+    float r1, r2;
     for (int ii = 0; ii < TRIES_PER_REJECTION_SAMPLING / BDIM_X; ii++) {
         r1 = curand_uniform(st);
         r2 = curand_uniform(st);
@@ -374,24 +355,24 @@ __device__ int get_direction_ptt_d(
 				break;
 		}
 
-        const REAL_T vx0 = max_curvature * DISC_VERT[DISC_FACE[jj*3]*2];
-        const REAL_T vx1 = max_curvature * DISC_VERT[DISC_FACE[jj*3+1]*2];
-        const REAL_T vx2 = max_curvature * DISC_VERT[DISC_FACE[jj*3+2]*2];
+        const float vx0 = max_curvature * DISC_VERT[DISC_FACE[jj*3]*2];
+        const float vx1 = max_curvature * DISC_VERT[DISC_FACE[jj*3+1]*2];
+        const float vx2 = max_curvature * DISC_VERT[DISC_FACE[jj*3+2]*2];
 
-        const REAL_T vy0 = max_curvature * DISC_VERT[DISC_FACE[jj*3]*2 + 1];
-        const REAL_T vy1 = max_curvature * DISC_VERT[DISC_FACE[jj*3+1]*2 + 1];
-        const REAL_T vy2 = max_curvature * DISC_VERT[DISC_FACE[jj*3+2]*2 + 1];
+        const float vy0 = max_curvature * DISC_VERT[DISC_FACE[jj*3]*2 + 1];
+        const float vy1 = max_curvature * DISC_VERT[DISC_FACE[jj*3+1]*2 + 1];
+        const float vy2 = max_curvature * DISC_VERT[DISC_FACE[jj*3+2]*2 + 1];
 
         k1_probe = vx0 + r1 * (vx1 - vx0) + r2 * (vx2 - vx0);
         k2_probe = vy0 + r1 * (vy1 - vy0) + r2 * (vy2 - vy0);
 
         get_probing_frame_d<IS_INIT>(__frame_sh, st, probing_frame);
 
-        const REAL_T this_support = calculate_data_support_d(first_val,
+        const float this_support = calculate_data_support_d(first_val,
                                                              pos, pmf, dimx, dimt,
                                                              probe_step_size,
                                                              absolpmf_thresh,
-                                                             odf_sphere_vertices,
+                                                             sphere_vertices_lut,
                                                              k1_probe, k2_probe,
                                                              probing_frame);
 
@@ -408,8 +389,8 @@ __device__ int get_direction_ptt_d(
                 if (IS_INIT) {
                     dirs[0] = dir;
                 } else {
-                    REAL_T __prop[9];
-                    REAL_T __dir[3];
+                    float __prop[9];
+                    float __dir[3];
                     prepare_propagator_d(k1_probe, k2_probe, step_size/STEP_FRAC, __prop);
                     get_probing_frame_d<0>(__frame_sh, st, probing_frame);
                     propagate_frame_d(__prop, probing_frame, __dir);
@@ -430,26 +411,24 @@ __device__ int get_direction_ptt_d(
 
 
 template<int BDIM_X,
-         int BDIM_Y,
-         typename REAL_T,
-         typename REAL3_T>
+         int BDIM_Y>
 __device__ bool init_frame_ptt_d(
     curandStatePhilox4_32_10_t *st,
     const cudaTextureObject_t *__restrict__ pmf,
-    const REAL_T max_angle,
-    const REAL_T step_size,
-    REAL3_T first_step,
+    const float max_angle,
+    const float step_size,
+    float3 first_step,
     const int dimx, const int dimy, const int dimz, const int dimt,
-    REAL3_T seed,
-    const REAL3_T *__restrict__ sphere_vertices,
-    REAL_T* __frame) {
+    float3 seed,
+    const cudaTextureObject_t *__restrict__ sphere_vertices_lut,
+    float* __frame) {
     const int tidx = threadIdx.x;
 
     const int lid = (threadIdx.y*BDIM_X + tidx) % 32;
     const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
 
     bool init_norm_success;
-    REAL3_T tmp;
+    float3 tmp;
 
     // Here we probabilistic find a good intial normal for this initial direction 
     init_norm_success = (bool) get_direction_ptt_d<BDIM_X, BDIM_Y, 1>(
@@ -461,7 +440,7 @@ __device__ bool init_frame_ptt_d(
         __frame,
         dimx, dimy, dimz, dimt,
         seed,
-        sphere_vertices,
+        sphere_vertices_lut,
         &tmp);
     __syncwarp(WMASK);
 
@@ -476,7 +455,7 @@ __device__ bool init_frame_ptt_d(
             __frame,
             dimx, dimy, dimz, dimt,
             seed,
-            sphere_vertices,
+            sphere_vertices_lut,
             &tmp);
         __syncwarp(WMASK);
 

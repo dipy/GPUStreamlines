@@ -46,20 +46,9 @@ __global__ void getNumStreamlinesPtt_k(
 
         #pragma unroll
         for (int i = tidx; i < dimt; i += BDIM_X) {
-                // REAL_T z_query = point.z + (REAL_T)(i * dimz);
-                // __pmf_data_sh[i] = tex3D<REAL_T>(*pmf, point.x, point.y, z_query);
-
                 REAL_T x_query = (REAL_T)(i * dimx) + point.x;
                 __pmf_data_sh[i] = tex3D<REAL_T>(*pmf, x_query, point.y, point.z);
-        }
-        __syncwarp(WMASK);
-    
-        const REAL_T absolpmf_thresh = PMF_THRESHOLD_P * max_d<BDIM_X>(dimt, __pmf_data_sh, REAL_MIN);
-        __syncwarp(WMASK);
-
-        #pragma unroll
-        for(int i = tidx; i < dimt; i += BDIM_X) {
-                if (__pmf_data_sh[i] < absolpmf_thresh) {
+                if (__pmf_data_sh[i] < PMF_THRESHOLD_P) {
                         __pmf_data_sh[i] = 0.0;
                 }
         }

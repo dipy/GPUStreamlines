@@ -313,7 +313,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                          DATA_T dataf,
                          const REAL_T *__restrict__ metric_map,
 		         const int samplm_nr,
-                         const REAL3_T *__restrict__ sphere_vertices,
+                         DATA_T sphere_vertices,
                          const int2 *__restrict__ sphere_edges,
                          const int num_edges,
                          int *__restrict__ nsteps,
@@ -358,7 +358,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                                                         direction,
                                                         dimx, dimy, dimz, dimt,
                                                         point,
-                                                        sphere_vertices,
+                                                        (const REAL3_T *__restrict__) sphere_vertices,
                                                         sphere_edges,
                                                         num_edges,
                                                         __sh_new_dir + tidy);
@@ -533,7 +533,7 @@ __global__ void genStreamlinesMergeProb_k(
                                       DATA_T dataf,
                                       const REAL_T *__restrict__ metric_map,
 				      const int samplm_nr,
-                                      const REAL3_T *__restrict__ sphere_vertices,
+                                      DATA_T sphere_vertices,
                                       const int2 *__restrict__ sphere_edges,
                                       const int num_edges,
                                       const int    *__restrict__ slineOutOff,
@@ -597,13 +597,13 @@ __global__ void genStreamlinesMergeProb_k(
                 if (MODEL_T == PTT) {
                         if (!init_frame_ptt_d<BDIM_X, BDIM_Y>(
                                 &st,
-                                dataf,
+                                (cudaTextureObject_t*) dataf,
                                 max_angle,
                                 step_size,
                                 first_step,
                                 dimx, dimy, dimz, dimt,
                                 seed,
-                                sphere_vertices,
+                                (cudaTextureObject_t*) sphere_vertices,
                                 __ptt_frame
                         )) { // this fails rarely
                                 if (tidx == 0) {
