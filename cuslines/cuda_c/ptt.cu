@@ -7,6 +7,7 @@ __device__ __forceinline__ void norm3_d(REAL_T *num, int fail_ind) {
         num[1] /= scale;
         num[2] /= scale;
     } else {
+        printf("here");
         num[0] = num[1] = num[2] = 0;
         num[fail_ind] = 1.0; // this can happen randomly during propogation, though is exceedingly rare
     }
@@ -21,21 +22,15 @@ __device__ __forceinline__ void crossnorm3_d(REAL_T *dest, const REAL_T *src1, c
     norm3_d(dest, fail_ind);
 }
 
-template<int BDIM_X, typename REAL_T, typename REAL3_T>
+template<typename REAL_T, typename REAL3_T>
 __device__ REAL_T interp4_d(const REAL3_T pos, const REAL_T* frame,
                             const cudaTextureObject_t *__restrict__ pmf,
-                            const int dimx, const int dimy, const int dimz, const int dimt,
+                            const int dimx, const int dimt,
                             const REAL3_T *__restrict__ odf_sphere_vertices) {
-    const int tidx = threadIdx.x;
-
-    const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
-    const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
-
     int closest_odf_idx = 0;
     REAL_T __max_cos = REAL_T(0);
 
-    #pragma unroll
-    for (int ii = tidx; ii < dimt; ii+= BDIM_X) {  // TODO: I need to think about better ways of parallelizing this
+    for (int ii = 0; ii < dimt; ii++) {
         REAL_T cos_sim = FABS(
             odf_sphere_vertices[ii].x * frame[0] \
             + odf_sphere_vertices[ii].y * frame[1] \
@@ -45,29 +40,7 @@ __device__ REAL_T interp4_d(const REAL3_T pos, const REAL_T* frame,
             closest_odf_idx = ii;
         }
     }
-    __syncwarp(WMASK);
 
-    #pragma unroll
-    for(int i = BDIM_X/2; i; i /= 2) {
-        const REAL_T __tmp = __shfl_xor_sync(WMASK, __max_cos, i, BDIM_X);
-        const int __tmp_idx = __shfl_xor_sync(WMASK, closest_odf_idx, i, BDIM_X);
-        if (__tmp > __max_cos ||
-           (__tmp == __max_cos && __tmp_idx < closest_odf_idx)) {
-            __max_cos = __tmp;
-            closest_odf_idx = __tmp_idx;
-        }
-    }
-    __syncwarp(WMASK);
-
-#if 0
-    if (closest_odf_idx >= dimt || closest_odf_idx < 0) { 
-        printf("Error: closest_odf_idx out of bounds: %d (dimt: %d)\n", closest_odf_idx, dimt);
-    }
-#endif
-
-    // REAL_T z_query = pos.z + (REAL_T)(closest_odf_idx * dimz);
-    // return tex3D<REAL_T>(*pmf, pos.x, pos.y, z_query);
-    
     REAL_T x_query = (REAL_T)(closest_odf_idx*dimx) + pos.x;
     return tex3D<REAL_T>(*pmf, x_query, pos.y, pos.z);
 }
@@ -187,49 +160,40 @@ __device__ void propagate_frame_d(REAL_T* propagator, REAL_T* frame, REAL_T* dir
     }
 }
 
-template<int BDIM_X, typename REAL_T, typename REAL3_T>
+template<typename REAL_T, typename REAL3_T>
 __device__ REAL_T calculate_data_support_d(REAL_T support,
                                            const REAL3_T pos, const cudaTextureObject_t *__restrict__ pmf,
-                                           const int dimx, const int dimy, const int dimz, const int dimt,
+                                           const int dimx, const int dimt,
                                            const REAL_T probe_step_size,
                                            const REAL_T absolpmf_thresh,
                                            const REAL3_T *__restrict__ odf_sphere_vertices,
-                                           REAL_T* probing_prop_sh,
-                                           REAL_T* direc_sh, 
-                                           REAL3_T* probing_pos_sh,
-                                           REAL_T* k1_sh, REAL_T* k2_sh,
-                                           REAL_T* probing_frame_sh) {
-    const int tidx = threadIdx.x;
-
-    const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
-    const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
-
-    if (tidx == 0) {
-        prepare_propagator_d(
-            *k1_sh, *k2_sh,
-            probe_step_size, probing_prop_sh);
-        probing_pos_sh->x = pos.x;
-        probing_pos_sh->y = pos.y;
-        probing_pos_sh->z = pos.z;
-    }
-    __syncwarp(WMASK);
+                                           REAL_T k1, REAL_T k2,
+                                           REAL_T* probing_frame) {
+    
+    REAL_T probing_prop[9];
+    REAL_T direc[3];
+    REAL3_T probing_pos;
+    REAL_T fod_amp;
+    prepare_propagator_d(
+        k1, k2,
+        probe_step_size, probing_prop);
+    probing_pos.x = pos.x;
+    probing_pos.y = pos.y;
+    probing_pos.z = pos.z;
 
     for (int ii = 0; ii < PROBE_QUALITY; ii++) { // we spend about 2/3 of our time in this loop when doing PTT
-        if (tidx == 0) {
-            propagate_frame_d(
-                probing_prop_sh,
-                probing_frame_sh,
-                direc_sh);
+        propagate_frame_d(
+            probing_prop,
+            probing_frame,
+            direc);
 
-            probing_pos_sh->x += direc_sh[0];
-            probing_pos_sh->y += direc_sh[1];
-            probing_pos_sh->z += direc_sh[2];
-        }
-        __syncwarp(WMASK);
+        probing_pos.x += direc[0];
+        probing_pos.y += direc[1];
+        probing_pos.z += direc[2];
 
-        const REAL_T fod_amp = interp4_d<BDIM_X>( // This is the most expensive call
-            *probing_pos_sh, probing_frame_sh, pmf,
-            dimx, dimy, dimz, dimt,
+        const REAL_T fod_amp = interp4_d( // This is the most expensive call
+            probing_pos, probing_frame, pmf,
+            dimx, dimt,
             odf_sphere_vertices);
 
         if (!ALLOW_WEAK_LINK && (fod_amp < absolpmf_thresh)) {
@@ -273,24 +237,8 @@ __device__ int get_direction_ptt_d(
 	__shared__ REAL_T face_cdf_sh[BDIM_Y*DISC_FACE_CNT];
     __shared__ REAL_T vert_pdf_sh[BDIM_Y*DISC_VERT_CNT];
 
-    __shared__ REAL_T probing_frame_sh[BDIM_Y*9];
-    __shared__ REAL_T k1_probe_sh[BDIM_Y];
-    __shared__ REAL_T k2_probe_sh[BDIM_Y];
-
-    __shared__ REAL_T probing_prop_sh[BDIM_Y*9];
-    __shared__ REAL_T direc_sh[BDIM_Y*3];
-    __shared__ REAL3_T probing_pos_sh[BDIM_Y];
-
     REAL_T *__face_cdf_sh = face_cdf_sh + tidy*DISC_FACE_CNT;
     REAL_T *__vert_pdf_sh = vert_pdf_sh + tidy*DISC_VERT_CNT;
-
-    REAL_T *__probing_frame_sh = probing_frame_sh + tidy*9;
-    REAL_T *__k1_probe_sh = k1_probe_sh + tidy;
-    REAL_T *__k2_probe_sh = k2_probe_sh + tidy;
-
-    REAL_T *__probing_prop_sh = probing_prop_sh + tidy*9;
-    REAL_T *__direc_sh = direc_sh + tidy*3;
-    REAL3_T *__probing_pos_sh = probing_pos_sh + tidy;
 
     const REAL_T probe_step_size = ((step_size / PROBE_FRAC) / (PROBE_QUALITY - 1));  // TODO: is this -1 necessary?
     const REAL_T max_curvature = 2.0 * SIN(max_angle / 2.0) / (step_size / PROBE_FRAC); // This seems to work well
@@ -313,31 +261,30 @@ __device__ int get_direction_ptt_d(
         }
     }
 
-    const REAL_T first_val = interp4_d<BDIM_X>(
+    const REAL_T first_val = interp4_d(
         pos, __frame_sh, pmf,
-        dimx, dimy, dimz, dimt,
+        dimx, dimt,
         odf_sphere_vertices);
     __syncwarp(WMASK);
 
     // Calculate __vert_pdf_sh
-    bool support_found = false;
-    for (int ii = 0; ii < DISC_VERT_CNT; ii++) {
-        if (tidx == 0) {
-            *__k1_probe_sh = DISC_VERT[ii*2] * max_curvature;
-            *__k2_probe_sh = DISC_VERT[ii*2+1] * max_curvature;
-            get_probing_frame_d<IS_INIT>(__frame_sh, st, __probing_frame_sh);
-        }
-        __syncwarp(WMASK);
+    REAL_T probing_frame[9];
+    REAL_T k1_probe, k2_probe;
+    bool support_found = 0;
+    for (int ii = tidx; ii < DISC_VERT_CNT; ii += BDIM_X) {
+        k1_probe = DISC_VERT[ii*2] * max_curvature;
+        k2_probe = DISC_VERT[ii*2+1] * max_curvature;
 
-        const REAL_T this_support = calculate_data_support_d<BDIM_X>(
+        get_probing_frame_d<IS_INIT>(__frame_sh, st, probing_frame);
+
+        const REAL_T this_support = calculate_data_support_d(
             first_val,
-            pos, pmf, dimx, dimy, dimz, dimt,
+            pos, pmf, dimx, dimt,
             probe_step_size,
             absolpmf_thresh,
             odf_sphere_vertices,
-            __probing_prop_sh, __direc_sh, __probing_pos_sh,
-            __k1_probe_sh, __k2_probe_sh,
-            __probing_frame_sh);
+            k1_probe, k2_probe,
+            probing_frame);
 
 #if 0
         if (threadIdx.y == 1 && ii == 0) { 
@@ -346,17 +293,14 @@ __device__ int get_direction_ptt_d(
 #endif
 
         if (this_support < PROBE_QUALITY * absolpmf_thresh) {
-            if (tidx == 0) {
-                __vert_pdf_sh[ii] = 0;
-            }
+            __vert_pdf_sh[ii] = 0;
         } else {
-            if (tidx == 0) {
-                __vert_pdf_sh[ii] = this_support;
-            }
+            __vert_pdf_sh[ii] = this_support;
             support_found = 1;
         }
     }
-    if (support_found == 0) {
+    const int __msk = __ballot_sync(WMASK, support_found);
+    if (__msk == 0) {
         return 0;
     }
 
@@ -415,71 +359,72 @@ __device__ int get_direction_ptt_d(
 #endif
 
     // Sample random valid faces randomly
-    for (int ii = 0; ii < TRIES_PER_REJECTION_SAMPLING; ii++) {
-        if (tidx == 0) {
-            REAL_T r1 = curand_uniform(st);
-            REAL_T r2 = curand_uniform(st);
-            if (r1 + r2 > 1) {
-                r1 = 1 - r1;
-                r2 = 1 - r2;
-            }
+    REAL_T r1, r2;
+    for (int ii = 0; ii < TRIES_PER_REJECTION_SAMPLING / BDIM_X; ii++) {
+        r1 = curand_uniform(st);
+        r2 = curand_uniform(st);
+		if (r1 + r2 > 1) {
+			r1 = 1 - r1;
+			r2 = 1 - r2;
+		}
 
-            __tmp = curand_uniform(st) * last_cdf;
-            int jj;
-            for (jj = 0; jj < DISC_FACE_CNT; jj++) { // TODO: parallelize this
-                if (__face_cdf_sh[jj] >= __tmp)
-                    break;
-            }
+        __tmp = curand_uniform(st) * last_cdf;
+		int jj;
+		for (jj = 0; jj < DISC_FACE_CNT; jj++) {
+			if (__face_cdf_sh[jj] >= __tmp)
+				break;
+		}
 
-            const REAL_T vx0 = max_curvature * DISC_VERT[DISC_FACE[jj*3]*2];
-            const REAL_T vx1 = max_curvature * DISC_VERT[DISC_FACE[jj*3+1]*2];
-            const REAL_T vx2 = max_curvature * DISC_VERT[DISC_FACE[jj*3+2]*2];
+        const REAL_T vx0 = max_curvature * DISC_VERT[DISC_FACE[jj*3]*2];
+        const REAL_T vx1 = max_curvature * DISC_VERT[DISC_FACE[jj*3+1]*2];
+        const REAL_T vx2 = max_curvature * DISC_VERT[DISC_FACE[jj*3+2]*2];
 
-            const REAL_T vy0 = max_curvature * DISC_VERT[DISC_FACE[jj*3]*2 + 1];
-            const REAL_T vy1 = max_curvature * DISC_VERT[DISC_FACE[jj*3+1]*2 + 1];
-            const REAL_T vy2 = max_curvature * DISC_VERT[DISC_FACE[jj*3+2]*2 + 1];
+        const REAL_T vy0 = max_curvature * DISC_VERT[DISC_FACE[jj*3]*2 + 1];
+        const REAL_T vy1 = max_curvature * DISC_VERT[DISC_FACE[jj*3+1]*2 + 1];
+        const REAL_T vy2 = max_curvature * DISC_VERT[DISC_FACE[jj*3+2]*2 + 1];
 
-            *__k1_probe_sh = vx0 + r1 * (vx1 - vx0) + r2 * (vx2 - vx0);
-            *__k2_probe_sh = vy0 + r1 * (vy1 - vy0) + r2 * (vy2 - vy0);
-            get_probing_frame_d<IS_INIT>(__frame_sh, st, __probing_frame_sh);
-        }
+        k1_probe = vx0 + r1 * (vx1 - vx0) + r2 * (vx2 - vx0);
+        k2_probe = vy0 + r1 * (vy1 - vy0) + r2 * (vy2 - vy0);
+
+        get_probing_frame_d<IS_INIT>(__frame_sh, st, probing_frame);
+
+        const REAL_T this_support = calculate_data_support_d(first_val,
+                                                             pos, pmf, dimx, dimt,
+                                                             probe_step_size,
+                                                             absolpmf_thresh,
+                                                             odf_sphere_vertices,
+                                                             k1_probe, k2_probe,
+                                                             probing_frame);
+
+
         __syncwarp(WMASK);
 
-        const REAL_T this_support = calculate_data_support_d<BDIM_X>(
-            first_val,
-            pos, pmf, dimx, dimy, dimz, dimt,
-            probe_step_size,
-            absolpmf_thresh,
-            odf_sphere_vertices,
-            __probing_prop_sh, __direc_sh, __probing_pos_sh,
-            __k1_probe_sh, __k2_probe_sh,
-            __probing_frame_sh);
-        __syncwarp(WMASK);
-
-        if (this_support < PROBE_QUALITY * absolpmf_thresh) {
-            continue;
+        int winning_lane = -1; // -1 indicates nobody won
+        int __msk = __ballot_sync(WMASK, this_support >= PROBE_QUALITY * absolpmf_thresh);
+        if (__msk != 0) {
+            winning_lane = __ffs(__msk) - 1;
         }
+        if (winning_lane != -1) {
+            if (tidx == winning_lane) {
+                if (IS_INIT) {
+                    dirs[0] = dir;
+                } else {
+                    REAL_T __prop[9];
+                    REAL_T __dir[3];
+                    prepare_propagator_d(k1_probe, k2_probe, step_size/STEP_FRAC, __prop);
+                    get_probing_frame_d<0>(__frame_sh, st, probing_frame);
+                    propagate_frame_d(__prop, probing_frame, __dir);
+                    norm3_d(__dir, 0); // this will be scaled by the generic stepping code
+                    dirs[0] = MAKE_REAL3(__dir[0], __dir[1], __dir[2]);
+                }
 
-        if (tidx == 0) {
-            if (IS_INIT) {
-                dirs[0] = dir;
-            } else {
-                // propagate, but only 1/STEP_FRAC of a step
-                prepare_propagator_d(
-                    *__k1_probe_sh, *__k2_probe_sh,
-                    step_size/STEP_FRAC, __probing_prop_sh);
-                get_probing_frame_d<0>(__frame_sh, st, __probing_frame_sh);
-                propagate_frame_d(__probing_prop_sh, __probing_frame_sh, __direc_sh);
-                norm3_d(__direc_sh, 0); // this will be scaled by the generic stepping code
-                dirs[0] = MAKE_REAL3(__direc_sh[0], __direc_sh[1], __direc_sh[2]);
+                for (int jj = 0; jj < 9; jj++) {
+                    __frame_sh[jj] = probing_frame[jj];
+                }
             }
+            __syncwarp(WMASK);
+            return 1;
         }
-
-        if (tidx < 9) {
-            __frame_sh[tidx] = __probing_frame_sh[tidx];
-        }
-        __syncwarp(WMASK);
-        return 1;
     }
     return 0;
 }
