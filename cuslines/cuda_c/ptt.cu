@@ -7,7 +7,6 @@ __device__ __forceinline__ void norm3_d(REAL_T *num, int fail_ind) {
         num[1] /= scale;
         num[2] /= scale;
     } else {
-        printf("here");
         num[0] = num[1] = num[2] = 0;
         num[fail_ind] = 1.0; // this can happen randomly during propogation, though is exceedingly rare
     }
