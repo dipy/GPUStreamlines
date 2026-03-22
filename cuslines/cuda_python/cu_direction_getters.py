@@ -18,8 +18,6 @@ from cuslines.cuda_python.cutils import (
     REAL3_DTYPE_AS_STR,
     REAL_DTYPE,
     REAL_DTYPE_AS_STR,
-    REAL_SIZE,
-    THR_X_SL,
     ModelType,
     checkCudaErrors,
     EXCESS_ALLOC_FACT,
