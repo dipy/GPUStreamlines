@@ -60,10 +60,7 @@ __device__ int trilinear_interp_d(const REAL_T *__restrict__ dataf,
         return 0;
 }
 
-template<int BDIM_X,
-         int BDIM_Y,
-         typename REAL_T,
-         typename REAL3_T>
+template<typename REAL3_T>
 __device__ int check_point_d(const REAL3_T point,
                              const cudaTextureObject_t *__restrict__ metric_map) {
     float val = tex3D<float>(*metric_map, (float) point.z, (float) point.y, (float) point.x);

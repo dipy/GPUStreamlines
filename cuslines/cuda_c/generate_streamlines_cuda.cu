@@ -372,7 +372,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                 }
                 __syncwarp(WMASK);
 
-                tissue_class = check_point_d<BDIM_X, BDIM_Y, REAL_T, REAL3_T>(point, metric_map);
+                tissue_class = check_point_d<REAL3_T>(point, metric_map);
 
 #if 0
                 __syncwarp(WMASK);

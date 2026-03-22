@@ -805,7 +805,7 @@ __device__ int tracker_boot_d(
                 }
                 __syncwarp(WMASK);
 
-                tissue_class = check_point_d<BDIM_X, BDIM_Y, REAL_T, REAL3_T>(point, metric_map);
+                tissue_class = check_point_d<REAL3_T>(point, metric_map);
 
                 if (tissue_class == ENDPOINT ||
                     tissue_class == INVALIDPOINT ||
