@@ -1,4 +1,5 @@
-__device__ __forceinline__ void norm3_d(float *num, int fail_ind) {
+template<int FAIL_IND>
+__device__ __forceinline__ void norm3_d(float *num) {
     const float inv_scale = rnorm3df(num[0], num[1], num[2]);
 
     if (isfinite(inv_scale) && inv_scale > 0.0f && inv_scale < PTT_INV_NORM_EPS) {
@@ -7,16 +8,17 @@ __device__ __forceinline__ void norm3_d(float *num, int fail_ind) {
         num[2] *= inv_scale;
     } else {
         num[0] = num[1] = num[2] = 0;
-        num[fail_ind] = 1.0; // this can happen randomly during propogation, though is exceedingly rare
+        num[FAIL_IND] = 1.0; // this can happen randomly during propogation, though is exceedingly rare
     }
 }
 
-__device__ __forceinline__ void crossnorm3_d(float *dest, const float *src1, const float *src2, int fail_ind) {
+template<int FAIL_IND>
+__device__ __forceinline__ void crossnorm3_d(float *dest, const float *src1, const float *src2) {
     dest[0] = src1[1] * src2[2] - src1[2] * src2[1];
     dest[1] = src1[2] * src2[0] - src1[0] * src2[2];
     dest[2] = src1[0] * src2[1] - src1[1] * src2[0];
 
-    norm3_d(dest, fail_ind);
+    norm3_d<FAIL_IND>(dest);
 }
 
 __device__ float interp4_d(const float3 pos, const float* frame,
@@ -117,13 +119,13 @@ __device__ void get_probing_frame_d(const float* frame, curandStatePhilox4_32_10
         for (int ii = 0; ii < 3; ii++) { // tangent
             probing_frame[ii] = frame[ii];
         }
-        norm3_d(probing_frame, 0);
+        norm3_d<0>(probing_frame);
 
         random_normal(st, probing_frame);
-        norm3_d(probing_frame + 3, 1); // norm
+        norm3_d<1>(probing_frame + 3); // norm
 
         // calculate binorm
-        crossnorm3_d(probing_frame + 2*3, probing_frame, probing_frame + 3, 2); // binorm
+        crossnorm3_d<2>(probing_frame + 2*3, probing_frame, probing_frame + 3); // binorm
     } else {
         for (int ii = 0; ii < 9; ii++) {
             probing_frame[ii] =  frame[ii];
@@ -140,9 +142,9 @@ __device__ void propagate_frame_d(float* propagator, float* frame, float* direc)
         frame[2*3 + ii] = propagator[6]*frame[ii] + propagator[7]*frame[3+ii] + propagator[8]*frame[6+ii];
     }
 
-    norm3_d(__tmp, 0); // normalize tangent
-    crossnorm3_d(frame + 3, frame + 2*3, __tmp, 1); // calc normal
-    crossnorm3_d(frame + 2*3, __tmp, frame + 3, 2); // calculate binorm from tangent, norm
+    norm3_d<0>(__tmp); // normalize tangent
+    crossnorm3_d<1>(frame + 3, frame + 2*3, __tmp); // calc normal
+    crossnorm3_d<2>(frame + 2*3, __tmp, frame + 3); // calculate binorm from tangent, norm
 
     for (int ii = 0; ii < 3; ii++) {
         frame[ii] = __tmp[ii];
@@ -377,7 +379,7 @@ __device__ int get_direction_ptt_d(
                     prepare_propagator_d(k1_probe, k2_probe, STEP_SIZE/STEP_FRAC, __prop);
                     get_probing_frame_d<0>(__frame_sh, st, probing_frame);
                     propagate_frame_d(__prop, probing_frame, __dir);
-                    norm3_d(__dir, 0); // this will be scaled by the generic stepping code
+                    norm3_d<0>(__dir); // this will be scaled by the generic stepping code
                     dirs[0] = MAKE_REAL3(__dir[0], __dir[1], __dir[2]);
                 }
 
