@@ -97,7 +97,7 @@ class GPUDirectionGetter(ABC):
             "probe_step_size",
             "max_curvature",
             "probe_quality",
-            "probe_frac",
+            "step_frac",
         ]
         for name in optional_macros:
             if name.upper() not in self.macros:
@@ -421,7 +421,7 @@ class ProbDirectionGetter(GPUDirectionGetter):
 
 class PttDirectionGetter(ProbDirectionGetter):
     def __init__(
-        self, odf_lut_res: int = 128, probe_frac: int = 2, probe_quality: int = 4
+        self, odf_lut_res: int = 128, probe_length: float = 0.25, target_short_step: float = 0.025, probe_quality: int = 4
     ):
         """
         Use Parallel Transport Tractography
@@ -431,10 +431,15 @@ class PttDirectionGetter(ProbDirectionGetter):
         odf_lut_res: int
             Resolution of the ODF lookup table.
             Default: 128
-        probe_frac: int
-            Divides output step size (usually 0.5) to find probe length.
-            Default: 2
-        probe_quality : int
+        probe_length: int
+            Length of probing steps as fraction of voxel size.
+            Default: 0.25
+        target_short_step : float
+            Length of target short steps as fraction of voxel size.
+            Actual short probing steps will be chosen such that step size
+            is an integer multiple of the short step.
+            Default: 0.025
+        probe_quality : float
             Number of probing steps.
             Default: 4
         """
@@ -446,23 +451,19 @@ class PttDirectionGetter(ProbDirectionGetter):
         self.sphere_vertices_lut_d = []
         self.sphere_vertices_lut_array_d = []
 
-        self.probe_frac = probe_frac
+        self.probe_length = probe_length
         self.probe_quality = probe_quality
+        self.target_short_step = target_short_step
 
     def set_macros(self, gpu_tracker):
         self.macros["LOG2_WIDTH"] = str(int(self.log2_width))
         self.macros["WIDTH_MASK"] = str(int(self.width_mask))
-        self.macros["PROBE_FRAC"] = str(float(self.probe_frac))
         self.macros["PROBE_QUALITY"] = str(float(self.probe_quality))
-        self.macros["PROBE_STEP_SIZE"] = str(
-            float(((gpu_tracker.step_size / self.probe_frac) / (self.probe_quality)))
-        )
+        self.macros["PROBE_STEP_SIZE"] = str(float(self.probe_length))
+        self.macros["STEP_FRAC"] = str(int(np.round(gpu_tracker.step_size / self.target_short_step)))
         self.macros["MAX_CURVATURE"] = str(
             float(
-                self.probe_frac
-                * self.probe_quality
-                * np.sin(gpu_tracker.max_angle / 2.0)
-                / (gpu_tracker.step_size)
+                8.0*np.sin(gpu_tracker.max_angle / 2.0)
             )
         )
 

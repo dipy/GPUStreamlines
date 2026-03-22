@@ -4,7 +4,6 @@
 #include "disc.h"
 #include "globals.h"
 
-#define STEP_FRAC (20) // divides output step size (usually 0.5) into this many internal steps
 #define SAMPLING_QUALITY (2) // can be 2-7
 #define ALLOW_WEAK_LINK (1)
 #define TRIES_PER_REJECTION_SAMPLING (1024)
