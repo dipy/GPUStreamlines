@@ -180,9 +180,7 @@ class GPUTracker:
 
             if isinstance(self.dg, PttDirectionGetter):
                 if REAL_SIZE != 4:
-                    raise ValueError(
-                        ("PTT on CUDA only supports 32-bit floats")
-                    )
+                    raise ValueError(("PTT on CUDA only supports 32-bit floats"))
                 dataf_d, dataf_array = allocate_texture(self.dataf)
                 self.dataf_d.append(dataf_d)
                 self.dataf_array.append(dataf_array)
@@ -213,7 +211,9 @@ class GPUTracker:
                 )
             )
 
-            metric_map_d, metric_map_array = allocate_texture(self.metric_map, address_mode="border")
+            metric_map_d, metric_map_array = allocate_texture(
+                self.metric_map, address_mode="border"
+            )
             self.metric_map_d.append(metric_map_d)
             self.metric_map_array.append(metric_map_array)
 

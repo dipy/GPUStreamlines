@@ -91,7 +91,14 @@ class GPUDirectionGetter(ABC):
             "THR_X_SL": str(int(THR_X_SL)),
         }
         self.set_macros(gpu_tracker)
-        optional_macros = ["log2_width", "width_mask", "probe_step_size", "max_curvature", "probe_quality", "probe_frac"]
+        optional_macros = [
+            "log2_width",
+            "width_mask",
+            "probe_step_size",
+            "max_curvature",
+            "probe_quality",
+            "probe_frac",
+        ]
         for name in optional_macros:
             if name.upper() not in self.macros:
                 self.macros[name.upper()] = "0"
@@ -102,7 +109,9 @@ class GPUDirectionGetter(ABC):
             name="cuslines",
             use_fast_math=True,
             std="c++17",
-            define_macro=[f"{k}={v}" if v is not None else k for k, v in self.macros.items()],
+            define_macro=[
+                f"{k}={v}" if v is not None else k for k, v in self.macros.items()
+            ],
             include_path=[
                 str(cuslines_cuda),
                 find_nvidia_header_directory("cudart"),
@@ -411,7 +420,9 @@ class ProbDirectionGetter(GPUDirectionGetter):
 
 
 class PttDirectionGetter(ProbDirectionGetter):
-    def __init__(self, odf_lut_res: int = 128, probe_frac: int = 2, probe_quality: int = 4):
+    def __init__(
+        self, odf_lut_res: int = 128, probe_frac: int = 2, probe_quality: int = 4
+    ):
         """
         Use Parallel Transport Tractography
 
@@ -443,8 +454,17 @@ class PttDirectionGetter(ProbDirectionGetter):
         self.macros["WIDTH_MASK"] = str(int(self.width_mask))
         self.macros["PROBE_FRAC"] = str(float(self.probe_frac))
         self.macros["PROBE_QUALITY"] = str(float(self.probe_quality))
-        self.macros["PROBE_STEP_SIZE"] = str(float(((gpu_tracker.step_size /  self.probe_frac) / (self.probe_quality))))
-        self.macros["MAX_CURVATURE"] = str(float(self.probe_frac * self.probe_quality * np.sin(gpu_tracker.max_angle / 2.0) / (gpu_tracker.step_size)))
+        self.macros["PROBE_STEP_SIZE"] = str(
+            float(((gpu_tracker.step_size / self.probe_frac) / (self.probe_quality)))
+        )
+        self.macros["MAX_CURVATURE"] = str(
+            float(
+                self.probe_frac
+                * self.probe_quality
+                * np.sin(gpu_tracker.max_angle / 2.0)
+                / (gpu_tracker.step_size)
+            )
+        )
 
     def allocate_on_gpu(self, n):
         if REAL_SIZE != 4:
@@ -533,11 +553,11 @@ class PttDirectionGetter(ProbDirectionGetter):
         else:
             data_f_rearranged = dataf
 
-        data_f_rearranged = data_f_rearranged.reshape(dimx, dimy, dimz, tiles_per_col, tiles_per_row)
+        data_f_rearranged = data_f_rearranged.reshape(
+            dimx, dimy, dimz, tiles_per_col, tiles_per_row
+        )
         data_f_rearranged = data_f_rearranged.transpose(2, 3, 1, 4, 0).reshape(
-            dimz,
-            tiles_per_col * dimy,
-            tiles_per_row * dimx
+            dimz, tiles_per_col * dimy, tiles_per_row * dimx
         )
         data_f_rearranged = np.ascontiguousarray(data_f_rearranged, dtype=np.float32)
 

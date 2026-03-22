@@ -98,9 +98,9 @@ def allocate_texture(data, address_mode="clamp"):
         address_mode = runtime.cudaTextureAddressMode.cudaAddressModeClamp
     elif address_mode == "border":
         address_mode = runtime.cudaTextureAddressMode.cudaAddressModeBorder
-        texDesc.borderColor[0] = -1.0;
-        texDesc.borderColor[1] = -1.0;
-        texDesc.borderColor[2] = -1.0;
+        texDesc.borderColor[0] = -1.0
+        texDesc.borderColor[1] = -1.0
+        texDesc.borderColor[2] = -1.0
     else:
         raise ValueError(f"Unsupported address_mode: {address_mode}")
     texDesc.addressMode[0] = address_mode
@@ -110,7 +110,5 @@ def allocate_texture(data, address_mode="clamp"):
     texDesc.readMode = runtime.cudaTextureReadMode.cudaReadModeElementType
     texDesc.normalizedCoords = 0
 
-    texObj = checkCudaErrors(
-        runtime.cudaCreateTextureObject(resDesc, texDesc, None)
-    )
+    texObj = checkCudaErrors(runtime.cudaCreateTextureObject(resDesc, texDesc, None))
     return texObj, dataf_array
