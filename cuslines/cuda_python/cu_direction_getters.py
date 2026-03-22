@@ -444,7 +444,7 @@ class PttDirectionGetter(ProbDirectionGetter):
         self.macros["PROBE_FRAC"] = str(float(self.probe_frac))
         self.macros["PROBE_QUALITY"] = str(float(self.probe_quality))
         self.macros["PROBE_STEP_SIZE"] = str(float(((gpu_tracker.step_size /  self.probe_frac) / (self.probe_quality))))
-        self.macros["MAX_CURVATURE"] = str(float(self.probe_frac * 2.0 * np.sin(gpu_tracker.max_angle / 2.0) / (gpu_tracker.step_size)))
+        self.macros["MAX_CURVATURE"] = str(float(self.probe_frac * self.probe_quality * np.sin(gpu_tracker.max_angle / 2.0) / (gpu_tracker.step_size)))
 
     def allocate_on_gpu(self, n):
         if REAL_SIZE != 4:
