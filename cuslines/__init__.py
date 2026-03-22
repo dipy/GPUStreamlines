@@ -35,24 +35,36 @@ BACKEND = _detect_backend()
 
 if BACKEND == "metal":
     from cuslines.metal import (
-        MetalGPUTracker as GPUTracker,
-        MetalProbDirectionGetter as ProbDirectionGetter,
-        MetalPttDirectionGetter as PttDirectionGetter,
         MetalBootDirectionGetter as BootDirectionGetter,
+    )
+    from cuslines.metal import (
+        MetalGPUTracker as GPUTracker,
+    )
+    from cuslines.metal import (
+        MetalProbDirectionGetter as ProbDirectionGetter,
+    )
+    from cuslines.metal import (
+        MetalPttDirectionGetter as PttDirectionGetter,
     )
 elif BACKEND == "cuda":
     from cuslines.cuda_python import (
+        BootDirectionGetter,
         GPUTracker,
         ProbDirectionGetter,
         PttDirectionGetter,
-        BootDirectionGetter,
     )
 elif BACKEND == "webgpu":
     from cuslines.webgpu import (
-        WebGPUTracker as GPUTracker,
-        WebGPUProbDirectionGetter as ProbDirectionGetter,
-        WebGPUPttDirectionGetter as PttDirectionGetter,
         WebGPUBootDirectionGetter as BootDirectionGetter,
+    )
+    from cuslines.webgpu import (
+        WebGPUProbDirectionGetter as ProbDirectionGetter,
+    )
+    from cuslines.webgpu import (
+        WebGPUPttDirectionGetter as PttDirectionGetter,
+    )
+    from cuslines.webgpu import (
+        WebGPUTracker as GPUTracker,
     )
 else:
     raise ImportError(

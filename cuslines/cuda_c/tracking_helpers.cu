@@ -1,43 +1,18 @@
 
 using namespace cuwsort;
 
-template<typename REAL_T>
-__device__ REAL_T interpolation_helper_d(const REAL_T*__restrict__ dataf, const REAL_T wgh[3][2], const long long coo[3][2], int dimy, int dimz, int dimt, int t) {
-    REAL_T __tmp = 0;
-    #pragma unroll
-    for (int i = 0; i < 2; i++) {
-        #pragma unroll
-        for (int j = 0; j < 2; j++) {
-            #pragma unroll
-            for (int k = 0; k < 2; k++) {
-                __tmp += wgh[0][i] * wgh[1][j] * wgh[2][k] *
-                         dataf[coo[0][i] * dimy * dimz * dimt +
-                               coo[1][j] * dimz * dimt +
-                               coo[2][k] * dimt +
-                               t];
-            }
-        }
-    }
-    return __tmp;
-}
-
 template<int BDIM_X,
          typename REAL_T,
          typename REAL3_T>
-__device__ int trilinear_interp_d(const int dimx,
-                                  const int dimy,
-                                  const int dimz,
-                                  const int dimt,
-                                  int dimt_idx, // If -1, get all
-                                  const REAL_T *__restrict__ dataf,
+__device__ int trilinear_interp_d(const REAL_T *__restrict__ dataf,
                                   const REAL3_T point,
                                   REAL_T *__restrict__ __vox_data) {
         const REAL_T HALF = static_cast<REAL_T>(0.5);
 
         // all thr compute the same here
-        if (point.x < -HALF || point.x+HALF >= dimx ||
-            point.y < -HALF || point.y+HALF >= dimy ||
-               point.z < -HALF || point.z+HALF >= dimz) {
+        if (point.x < -HALF || point.x+HALF >= DIMX ||
+            point.y < -HALF || point.y+HALF >= DIMY ||
+               point.z < -HALF || point.z+HALF >= DIMZ) {
                 return -1;
         }
 
@@ -53,66 +28,48 @@ __device__ int trilinear_interp_d(const int dimx,
         wgh[0][1] = point.x - fl.x; 
         wgh[0][0] = ONE-wgh[0][1]; 
         coo[0][0] = MAX(0, fl.x);
-        coo[0][1] = MIN(dimx-1, coo[0][0]+1);
+        coo[0][1] = MIN(DIMX-1, coo[0][0]+1);
 
         wgh[1][1] = point.y - fl.y; 
         wgh[1][0] = ONE-wgh[1][1]; 
         coo[1][0] = MAX(0, fl.y);
-        coo[1][1] = MIN(dimy-1, coo[1][0]+1);
+        coo[1][1] = MIN(DIMY-1, coo[1][0]+1);
 
         wgh[2][1] = point.z - fl.z; 
         wgh[2][0] = ONE-wgh[2][1]; 
         coo[2][0] = MAX(0, fl.z);
-        coo[2][1] = MIN(dimz-1, coo[2][0]+1);
+        coo[2][1] = MIN(DIMZ-1, coo[2][0]+1);
 
-        if (dimt_idx == -1) {
-                for (int t = threadIdx.x; t < dimt; t += BDIM_X) {
-                        __vox_data[t] = interpolation_helper_d(dataf, wgh, coo, dimy, dimz, dimt, t);
+        for (int t = threadIdx.x; t < DIMT; t += BDIM_X) {
+                __vox_data[t] = 0;
+                #pragma unroll
+                for (int i = 0; i < 2; i++) {
+                        #pragma unroll
+                        for (int j = 0; j < 2; j++) {
+                        #pragma unroll
+                        for (int k = 0; k < 2; k++) {
+                                __vox_data[t] += wgh[0][i] * wgh[1][j] * wgh[2][k] *
+                                        dataf[coo[0][i] * DIMY * DIMZ * DIMT +
+                                        coo[1][j] * DIMZ * DIMT +
+                                        coo[2][k] * DIMT +
+                                        t];
+                        }
+                        }
                 }
-        } else {
-                *__vox_data = interpolation_helper_d(dataf, wgh, coo, dimy, dimz, dimt, dimt_idx);
         }
-
-        // if (threadIdx.x == 0) {
-        //         printf("point: %f, %f, %f\n", point.x, point.y, point.z);
-        //         printf("dimt_idx: %d\n", dimt_idx);
-        //         // for(int i = 0; i < dimt; i++) {
-        //         //         printf("__vox_data[%d]: %f\n", i, __vox_data[i]);
-        //         // }
-        // }
         return 0;
 }
 
-template<int BDIM_X,
-         int BDIM_Y,
-         typename REAL_T,
-         typename REAL3_T>
-__device__ int check_point_d(const REAL_T tc_threshold,
-			     const REAL3_T point,
-                             const int dimx,
-                             const int dimy,
-                             const int dimz,
-                             const REAL_T *__restrict__ metric_map) {
+template<typename REAL3_T>
+__device__ int check_point_d(const REAL3_T point,
+                             const cudaTextureObject_t *__restrict__ metric_map) {
+    float val = tex3D<float>(*metric_map, (float) point.z, (float) point.y, (float) point.x);
 
-        const int tidy = threadIdx.y;
+    if (val == -1.0f) {
+        return OUTSIDEIMAGE;
+    }
 
-        const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
-        const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
-
-        __shared__ REAL_T __shInterpOut[BDIM_Y];
-
-        const int rv = trilinear_interp_d<BDIM_X>(dimx, dimy, dimz, 1, 0, metric_map, point, __shInterpOut+tidy);
-        __syncwarp(WMASK);
-#if 0
-        if (threadIdx.y == 1 && threadIdx.x == 0) {
-                printf("__shInterpOut[tidy]: %f, TC_THRESHOLD_P: %f\n", __shInterpOut[tidy], TC_THRESHOLD_P);
-        }
-#endif
-        if (rv != 0) {
-                return OUTSIDEIMAGE;
-        }
-        //return (__shInterpOut[tidy] > TC_THRESHOLD_P) ? TRACKPOINT : ENDPOINT;
-        return (__shInterpOut[tidy] > tc_threshold) ? TRACKPOINT : ENDPOINT;
+    return (val > TC_THRESHOLD) ? TRACKPOINT : ENDPOINT;
 }
 
 template<int BDIM_X,
@@ -123,11 +80,7 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
                                        REAL3_T *__restrict__ dirs,
                                  const REAL3_T *__restrict__ sphere_vertices,
                                  const int2 *__restrict__ sphere_edges,
-                                 const int num_edges,
-				 int samplm_nr,
-				 int *__restrict__ __shInd,
-				 const REAL_T relative_peak_thres,
-				 const REAL_T min_separation_angle) {
+				 int *__restrict__ __shInd) {
 
         const int tidx = threadIdx.x;
 
@@ -139,11 +92,11 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
 //        __shared__ int __shInd[BDIM_Y][SAMPLM_NR];
 
         #pragma unroll
-        for(int j = tidx; j < samplm_nr; j += BDIM_X) {
+        for(int j = tidx; j < SAMPLM_NR; j += BDIM_X) {
 		__shInd[j] = 0;
         }
 
-        REAL_T odf_min = min_d<BDIM_X>(samplm_nr, odf, REAL_MAX);
+        REAL_T odf_min = min_d<BDIM_X>(SAMPLM_NR, odf, REAL_MAX);
         odf_min = MAX(0, odf_min);
 
         __syncwarp(WMASK);
@@ -152,8 +105,8 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
         // selecting only the indices corrisponding to maxima Ms
         // such that M-odf_min >= relative_peak_thres
         //#pragma unroll
-        for(int j = 0; j < num_edges; j += BDIM_X) {
-                if (j+tidx < num_edges) {
+        for(int j = 0; j < NUM_EDGES; j += BDIM_X) {
+                if (j+tidx < NUM_EDGES) {
                         const int u_ind = sphere_edges[j+tidx].x;
                         const int v_ind = sphere_edges[j+tidx].y;
 
@@ -179,7 +132,7 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
         }
         __syncwarp(WMASK);
 
-        const REAL_T compThres = relative_peak_thres*max_mask_transl_d<BDIM_X>(samplm_nr, __shInd, odf, -odf_min, REAL_MIN);
+        const REAL_T compThres = RELATIVE_PEAK_THRESH*max_mask_transl_d<BDIM_X>(SAMPLM_NR, __shInd, odf, -odf_min, REAL_MIN);
 #if 1
 /*
         if (!tidy && !tidx) {
@@ -193,9 +146,9 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
         // compact indices of positive values to the right
         int n = 0;
 
-        for(int j = 0; j < samplm_nr; j += BDIM_X) {
+        for(int j = 0; j < SAMPLM_NR; j += BDIM_X) {
 
-                const int __v = (j+tidx < samplm_nr) ? __shInd[j+tidx] : -1;
+                const int __v = (j+tidx < SAMPLM_NR) ? __shInd[j+tidx] : -1;
                 const int __keep = (__v > 0) && ((odf[j+tidx]-odf_min) >= compThres);
                 const int __msk = __ballot_sync(WMASK, __keep);
 
@@ -242,7 +195,7 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
                 // remove_similar_vertices()
                 // PRELIMINARY INEFFICIENT, SINGLE TH, IMPLEMENTATION
                 if (tidx == 0) {
-                        const REAL_T cos_similarity = COS(min_separation_angle);
+                        const REAL_T cos_similarity = COS(MIN_SEPARATION_ANGLE);
 
                         dirs[0] = sphere_vertices[__shInd[0]];
 

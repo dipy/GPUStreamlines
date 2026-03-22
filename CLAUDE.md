@@ -49,9 +49,9 @@ cuslines/
     cu_propagate_seeds.py       # SeedBatchPropagator: chunked seed processing
     cu_direction_getters.py     # Direction getter ABC + Boot/Prob/PTT implementations
     cutils.py                   # REAL_DTYPE, REAL3_DTYPE, checkCudaErrors(), ModelType enum
-    _globals.py                 # AUTO-GENERATED from globals.h (never edit manually)
+    _globals.py                 # Global constants useful for all languages
   cuda_c/                       # CUDA kernel source
-    globals.h                   # Source-of-truth for constants (REAL_SIZE, thread config)
+    globals.h                   # CUDA specific global constants
     generate_streamlines_cuda.cu, boot.cu, ptt.cu, tracking_helpers.cu, utils.cu
     cudamacro.h, cuwsort.cuh, ptt.cuh, disc.h
   metal/                        # Metal backend (mirrors cuda_python/)
@@ -82,7 +82,6 @@ Each has `from_dipy_*()` class methods for initialization from DIPY models.
 
 ## Critical Conventions
 
-- **`_globals.py` is auto-generated** from `cuslines/cuda_c/globals.h` during `setup.py` build via `defines_to_python()`. Never edit it manually; change `globals.h` and rebuild.
 - **GPU arrays must be C-contiguous** — always use `np.ascontiguousarray()` and project scalar types (`REAL_DTYPE`, `REAL_SIZE` from `cutils.py` or `mutils.py`).
 - **All CUDA API calls must be wrapped** with `checkCudaErrors()`.
 - **Angle units**: CLI accepts degrees, internals convert to radians before the GPU layer.

@@ -1,29 +1,27 @@
-from cuda.bindings import runtime
-from cuda.bindings.runtime import cudaMemcpyKind
-# TODO: consider cuda core over cuda bindings
-
-import numpy as np
-from tqdm import tqdm
 import logging
 from math import radians
 
-from cuslines.cuda_python.cutils import (
-    REAL_SIZE,
-    REAL_DTYPE,
-    checkCudaErrors,
-)
-from cuslines.cuda_python.cu_direction_getters import (
-    GPUDirectionGetter,
-    BootDirectionGetter,
-)
-from cuslines.cuda_python.cu_propagate_seeds import SeedBatchPropagator
-
+import numpy as np
+from cuda.bindings import runtime
+from cuda.bindings.runtime import cudaMemcpyKind
+from dipy.io.stateful_tractogram import Space, StatefulTractogram
+from nibabel.streamlines.array_sequence import ArraySequence
+from nibabel.streamlines.tractogram import Tractogram
+from tqdm import tqdm
 from trx.trx_file_memmap import TrxFile
 
-from nibabel.streamlines.tractogram import Tractogram
-from nibabel.streamlines.array_sequence import ArraySequence, MEGABYTE
-
-from dipy.io.stateful_tractogram import Space, StatefulTractogram
+from cuslines.cuda_python.cu_direction_getters import (
+    BootDirectionGetter,
+    GPUDirectionGetter,
+    PttDirectionGetter,
+)
+from cuslines.cuda_python.cu_propagate_seeds import SeedBatchPropagator
+from cuslines.cuda_python.cutils import (
+    REAL_DTYPE,
+    REAL_SIZE,
+    checkCudaErrors,
+    allocate_texture,
+)
 
 logger = logging.getLogger("GPUStreamlines")
 
@@ -103,12 +101,21 @@ class GPUTracker:
             Number of seeds to process in each chunk per GPU
             default: 25000
         """
-        self.dataf = np.ascontiguousarray(dataf, dtype=REAL_DTYPE)
-        self.metric_map = np.ascontiguousarray(stop_map, dtype=REAL_DTYPE)
+        self.dimx, self.dimy, self.dimz, self.dimt = dataf.shape
+        if hasattr(dg, "prepare_data"):
+            self.dataf = dg.prepare_data(
+                dataf,
+                stop_map,
+                stop_threshold,
+                sphere_vertices,
+            )
+        else:
+            self.dataf = np.ascontiguousarray(dataf, dtype=REAL_DTYPE)
+
+        self.metric_map = np.ascontiguousarray(stop_map, dtype=np.float32)
         self.sphere_vertices = np.ascontiguousarray(sphere_vertices, dtype=REAL_DTYPE)
         self.sphere_edges = np.ascontiguousarray(sphere_edges, dtype=np.int32)
 
-        self.dimx, self.dimy, self.dimz, self.dimt = dataf.shape
         self.nedges = int(sphere_edges.shape[0])
         if isinstance(dg, BootDirectionGetter):
             self.samplm_nr = int(dg.sampling_matrix.shape[0])
@@ -137,7 +144,9 @@ class GPUTracker:
         logger.info("Creating GPUTracker with %d GPUs...", self.ngpus)
 
         self.dataf_d = []
+        self.dataf_array = []
         self.metric_map_d = []
+        self.metric_map_array = []
         self.sphere_vertices_d = []
         self.sphere_edges_d = []
 
@@ -145,11 +154,10 @@ class GPUTracker:
         self.managed_data = []
 
         self.seed_propagator = SeedBatchPropagator(
-            gpu_tracker=self,
-            minlen=min_pts,
-            maxlen=max_pts
+            gpu_tracker=self, minlen=min_pts, maxlen=max_pts
         )
         self._allocated = False
+        self.dg.compile_program(self)
 
     def __enter__(self):
         self._allocate()
@@ -170,38 +178,28 @@ class GPUTracker:
         for ii in range(self.ngpus):
             checkCudaErrors(runtime.cudaSetDevice(ii))
 
-            # TODO: performance: dataf could be managed or texture memory instead?
-            self.dataf_d.append(
-                checkCudaErrors(runtime.cudaMalloc(REAL_SIZE * self.dataf.size))
-            )
-            self.metric_map_d.append(
-                checkCudaErrors(runtime.cudaMalloc(REAL_SIZE * self.metric_map.size))
-            )
+            if isinstance(self.dg, PttDirectionGetter):
+                if REAL_SIZE != 4:
+                    raise ValueError(("PTT on CUDA only supports 32-bit floats"))
+                dataf_d, dataf_array = allocate_texture(self.dataf)
+                self.dataf_d.append(dataf_d)
+                self.dataf_array.append(dataf_array)
+            else:
+                self.dataf_d.append(
+                    checkCudaErrors(runtime.cudaMalloc(REAL_SIZE * self.dataf.size))
+                )
+                checkCudaErrors(
+                    runtime.cudaMemcpy(
+                        self.dataf_d[ii],
+                        self.dataf.ctypes.data,
+                        REAL_SIZE * self.dataf.size,
+                        cudaMemcpyKind.cudaMemcpyHostToDevice,
+                    )
+                )
+
             self.sphere_vertices_d.append(
                 checkCudaErrors(
                     runtime.cudaMalloc(REAL_SIZE * self.sphere_vertices.size)
-                )
-            )
-            self.sphere_edges_d.append(
-                checkCudaErrors(
-                    runtime.cudaMalloc(np.int32().nbytes * self.sphere_edges.size)
-                )
-            )
-
-            checkCudaErrors(
-                runtime.cudaMemcpy(
-                    self.dataf_d[ii],
-                    self.dataf.ctypes.data,
-                    REAL_SIZE * self.dataf.size,
-                    cudaMemcpyKind.cudaMemcpyHostToDevice,
-                )
-            )
-            checkCudaErrors(
-                runtime.cudaMemcpy(
-                    self.metric_map_d[ii],
-                    self.metric_map.ctypes.data,
-                    REAL_SIZE * self.metric_map.size,
-                    cudaMemcpyKind.cudaMemcpyHostToDevice,
                 )
             )
             checkCudaErrors(
@@ -210,6 +208,18 @@ class GPUTracker:
                     self.sphere_vertices.ctypes.data,
                     REAL_SIZE * self.sphere_vertices.size,
                     cudaMemcpyKind.cudaMemcpyHostToDevice,
+                )
+            )
+
+            metric_map_d, metric_map_array = allocate_texture(
+                self.metric_map, address_mode="border"
+            )
+            self.metric_map_d.append(metric_map_d)
+            self.metric_map_array.append(metric_map_array)
+
+            self.sphere_edges_d.append(
+                checkCudaErrors(
+                    runtime.cudaMalloc(np.int32().nbytes * self.sphere_edges.size)
                 )
             )
             checkCudaErrors(
@@ -229,10 +239,18 @@ class GPUTracker:
 
         for n in range(self.ngpus):
             checkCudaErrors(runtime.cudaSetDevice(n))
-            if self.dataf_d[n]:
-                checkCudaErrors(runtime.cudaFree(self.dataf_d[n]))
+            if isinstance(self.dg, PttDirectionGetter):
+                if self.dataf_d[n]:
+                    checkCudaErrors(runtime.cudaDestroyTextureObject(self.dataf_d[n]))
+                if self.dataf_array[n]:
+                    checkCudaErrors(runtime.cudaFreeArray(self.dataf_array[n]))
+            else:
+                if self.dataf_d[n]:
+                    checkCudaErrors(runtime.cudaFree(self.dataf_d[n]))
             if self.metric_map_d[n]:
-                checkCudaErrors(runtime.cudaFree(self.metric_map_d[n]))
+                checkCudaErrors(runtime.cudaDestroyTextureObject(self.metric_map_d[n]))
+            if self.metric_map_array[n]:
+                checkCudaErrors(runtime.cudaFreeArray(self.metric_map_array[n]))
             if self.sphere_vertices_d[n]:
                 checkCudaErrors(runtime.cudaFree(self.sphere_vertices_d[n]))
             if self.sphere_edges_d[n]:
@@ -276,16 +294,18 @@ class GPUTracker:
         n_sls_guess = sl_per_seed_guess * seeds.shape[0]
 
         # trx files use memory mapping
-        trx_reference = TrxFile(
-            reference=ref_img
+        trx_reference = TrxFile(reference=ref_img)
+        trx_reference.streamlines._data = trx_reference.streamlines._data.astype(
+            np.float32
         )
-        trx_reference.streamlines._data = trx_reference.streamlines._data.astype(np.float32)
-        trx_reference.streamlines._offsets = trx_reference.streamlines._offsets.astype(np.uint64)
+        trx_reference.streamlines._offsets = trx_reference.streamlines._offsets.astype(
+            np.uint64
+        )
 
         trx_file = TrxFile(
             nb_streamlines=n_sls_guess,
             nb_vertices=n_sls_guess * sl_len_guess,
-            init_as=trx_reference
+            init_as=trx_reference,
         )
         offsets_idx = 0
         sls_data_idx = 0
