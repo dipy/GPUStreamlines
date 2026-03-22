@@ -151,8 +151,6 @@ __device__ void propagate_frame_d(float* propagator, float* frame, float* direc)
 
 __device__ float calculate_data_support_d(float support,
                                            const float3 pos, const cudaTextureObject_t *__restrict__ pmf,
-                                           const float probe_step_size,
-                                           const float absolpmf_thresh,
                                            const cudaTextureObject_t *__restrict__ sphere_vertices_lut,
                                            float k1, float k2,
                                            float* probing_frame) {
@@ -162,7 +160,7 @@ __device__ float calculate_data_support_d(float support,
     float3 probing_pos;
     prepare_propagator_d(
         k1, k2,
-        probe_step_size, probing_prop);
+        PROBE_STEP_SIZE, probing_prop);
     probing_pos.x = pos.x;
     probing_pos.y = pos.y;
     probing_pos.z = pos.z;
@@ -181,7 +179,7 @@ __device__ float calculate_data_support_d(float support,
             probing_pos, probing_frame, pmf,
             sphere_vertices_lut);
 
-        if (!ALLOW_WEAK_LINK && (fod_amp < absolpmf_thresh)) {
+        if (!ALLOW_WEAK_LINK && (fod_amp < PMF_THRESHOLD_P)) {
             return 0;
         }
         support += fod_amp;
@@ -195,8 +193,6 @@ template<int BDIM_X,
 __device__ int get_direction_ptt_d(
     curandStatePhilox4_32_10_t *st,
     const cudaTextureObject_t *__restrict__ pmf,
-    const float max_angle,
-    const float step_size,
     float3 dir,
     float *__frame_sh,
     float3 pos,
@@ -222,16 +218,6 @@ __device__ int get_direction_ptt_d(
     float *__face_cdf_sh = face_cdf_sh + tidy*DISC_FACE_CNT;
     float *__vert_pdf_sh = vert_pdf_sh + tidy*DISC_VERT_CNT;
 
-    const float probe_step_size = ((step_size / PROBE_FRAC) / (PROBE_QUALITY));
-    const float max_curvature = PROBE_FRAC * 2.0 * SIN(max_angle / 2.0) / (step_size);
-    const float absolpmf_thresh = PMF_THRESHOLD_P;
-
-#if 0
-        printf("absolpmf_thresh: %f, max_curvature: %f, probe_step_size: %f\n", absolpmf_thresh, max_curvature, probe_step_size);
-        printf("max_angle: %f\n", max_angle);
-        printf("step_size: %f\n", step_size);
-#endif
-
     float __tmp;
 
     __syncwarp(WMASK);
@@ -253,16 +239,14 @@ __device__ int get_direction_ptt_d(
     float k1_probe, k2_probe;
     bool support_found = 0;
     for (int ii = tidx; ii < DISC_VERT_CNT; ii += BDIM_X) {
-        k1_probe = DISC_VERT[ii*2] * max_curvature;
-        k2_probe = DISC_VERT[ii*2+1] * max_curvature;
+        k1_probe = DISC_VERT[ii*2] * MAX_CURVATURE;
+        k2_probe = DISC_VERT[ii*2+1] * MAX_CURVATURE;
 
         get_probing_frame_d<IS_INIT>(__frame_sh, st, probing_frame);
 
         const float this_support = calculate_data_support_d(
             first_val,
             pos, pmf,
-            probe_step_size,
-            absolpmf_thresh,
             sphere_vertices_lut,
             k1_probe, k2_probe,
             probing_frame);
@@ -273,7 +257,7 @@ __device__ int get_direction_ptt_d(
         }
 #endif
 
-        if (this_support < PROBE_QUALITY * absolpmf_thresh) {
+        if (this_support < PROBE_QUALITY * PMF_THRESHOLD_P) {
             __vert_pdf_sh[ii] = 0;
         } else {
             __vert_pdf_sh[ii] = this_support;
@@ -356,13 +340,13 @@ __device__ int get_direction_ptt_d(
 				break;
 		}
 
-        const float vx0 = max_curvature * DISC_VERT[DISC_FACE[jj*3]*2];
-        const float vx1 = max_curvature * DISC_VERT[DISC_FACE[jj*3+1]*2];
-        const float vx2 = max_curvature * DISC_VERT[DISC_FACE[jj*3+2]*2];
+        const float vx0 = MAX_CURVATURE * DISC_VERT[DISC_FACE[jj*3]*2];
+        const float vx1 = MAX_CURVATURE * DISC_VERT[DISC_FACE[jj*3+1]*2];
+        const float vx2 = MAX_CURVATURE * DISC_VERT[DISC_FACE[jj*3+2]*2];
 
-        const float vy0 = max_curvature * DISC_VERT[DISC_FACE[jj*3]*2 + 1];
-        const float vy1 = max_curvature * DISC_VERT[DISC_FACE[jj*3+1]*2 + 1];
-        const float vy2 = max_curvature * DISC_VERT[DISC_FACE[jj*3+2]*2 + 1];
+        const float vy0 = MAX_CURVATURE * DISC_VERT[DISC_FACE[jj*3]*2 + 1];
+        const float vy1 = MAX_CURVATURE * DISC_VERT[DISC_FACE[jj*3+1]*2 + 1];
+        const float vy2 = MAX_CURVATURE * DISC_VERT[DISC_FACE[jj*3+2]*2 + 1];
 
         k1_probe = vx0 + r1 * (vx1 - vx0) + r2 * (vx2 - vx0);
         k2_probe = vy0 + r1 * (vy1 - vy0) + r2 * (vy2 - vy0);
@@ -371,8 +355,6 @@ __device__ int get_direction_ptt_d(
 
         const float this_support = calculate_data_support_d(first_val,
                                                              pos, pmf,
-                                                             probe_step_size,
-                                                             absolpmf_thresh,
                                                              sphere_vertices_lut,
                                                              k1_probe, k2_probe,
                                                              probing_frame);
@@ -381,7 +363,7 @@ __device__ int get_direction_ptt_d(
         __syncwarp(WMASK);
 
         int winning_lane = -1; // -1 indicates nobody won
-        int __msk = __ballot_sync(WMASK, this_support >= PROBE_QUALITY * absolpmf_thresh);
+        int __msk = __ballot_sync(WMASK, this_support >= PROBE_QUALITY * PMF_THRESHOLD_P);
         if (__msk != 0) {
             winning_lane = __ffs(__msk) - 1;
         }
@@ -392,7 +374,7 @@ __device__ int get_direction_ptt_d(
                 } else {
                     float __prop[9];
                     float __dir[3];
-                    prepare_propagator_d(k1_probe, k2_probe, step_size/STEP_FRAC, __prop);
+                    prepare_propagator_d(k1_probe, k2_probe, STEP_SIZE/STEP_FRAC, __prop);
                     get_probing_frame_d<0>(__frame_sh, st, probing_frame);
                     propagate_frame_d(__prop, probing_frame, __dir);
                     norm3_d(__dir, 0); // this will be scaled by the generic stepping code
@@ -416,8 +398,6 @@ template<int BDIM_X,
 __device__ bool init_frame_ptt_d(
     curandStatePhilox4_32_10_t *st,
     const cudaTextureObject_t *__restrict__ pmf,
-    const float max_angle,
-    const float step_size,
     float3 first_step,
     float3 seed,
     const cudaTextureObject_t *__restrict__ sphere_vertices_lut,
@@ -434,8 +414,6 @@ __device__ bool init_frame_ptt_d(
     init_norm_success = (bool) get_direction_ptt_d<BDIM_X, BDIM_Y, 1>(
         st,
         pmf,
-        max_angle,
-        step_size,
         MAKE_REAL3(-first_step.x, -first_step.y, -first_step.z),
         __frame,
         seed,
@@ -448,8 +426,6 @@ __device__ bool init_frame_ptt_d(
         init_norm_success = (bool) get_direction_ptt_d<BDIM_X, BDIM_Y, 1>(
             st,
             pmf,
-            max_angle,
-            step_size,
             MAKE_REAL3(first_step.x, first_step.y, first_step.z),
             __frame,
             seed,

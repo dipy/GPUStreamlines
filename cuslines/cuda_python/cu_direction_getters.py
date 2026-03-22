@@ -36,6 +36,9 @@ class GPUDirectionGetter(ABC):
     def generateStreamlines(self, n, nseeds_gpu, block, grid, sp):
         pass
 
+    def set_macros(self, gpu_tracker):
+        pass
+
     def allocate_on_gpu(self, n):
         pass
 
@@ -59,30 +62,33 @@ class GPUDirectionGetter(ABC):
             program_opts = {"ptxas_options": ["-O3"]}
 
         n32dimt = ((gpu_tracker.dimt + 31) // 32) * 32
-        macros = [
-            ("__NVRTC__", None),
-            ("DIMX", str(gpu_tracker.dimx)),
-            ("DIMY", str(gpu_tracker.dimy)),
-            ("DIMZ", str(gpu_tracker.dimz)),
-            ("DIMT", str(gpu_tracker.dimt)),
-            ("N32DIMT", str(n32dimt)),
-        ]
-
-        # PTT compile-time constants
-        if hasattr(self, "log2_width"):
-            macros.append(("LOG2_WIDTH", str(int(self.log2_width))))
-        else:
-            macros.append(("LOG2_WIDTH", "0"))
-        if hasattr(self, "width_mask"):
-            macros.append(("WIDTH_MASK", str(int(self.width_mask))))
-        else:
-            macros.append(("WIDTH_MASK", "0"))
+        self.macros = {
+            "__NVRTC__": None,
+            "DIMX": str(int(gpu_tracker.dimx)),
+            "DIMY": str(int(gpu_tracker.dimy)),
+            "DIMZ": str(int(gpu_tracker.dimz)),
+            "DIMT": str(int(gpu_tracker.dimt)),
+            "N32DIMT": str(int(n32dimt)),
+            "STEP_SIZE": str(float(gpu_tracker.step_size)),
+            "MAX_ANGLE": str(float(gpu_tracker.max_angle)),
+            "TC_THRESHOLD": str(float(gpu_tracker.tc_threshold)),
+            "RELATIVE_PEAK_THRESH": str(float(gpu_tracker.relative_peak_thresh)),
+            "MIN_SEPARATION_ANGLE": str(float(gpu_tracker.min_separation_angle)),
+            "RNG_SEED": str(int(gpu_tracker.rng_seed)),
+            "SAMPLM_NR": str(int(gpu_tracker.samplm_nr)),
+            "NUM_EDGES": str(int(gpu_tracker.nedges)),
+        }
+        self.set_macros(gpu_tracker)
+        optional_macros = ["log2_width", "width_mask", "probe_step_size", "max_curvature", "probe_quality", "probe_frac"]
+        for name in optional_macros:
+            if name.upper() not in self.macros:
+                self.macros[name.upper()] = "0"
 
         program_options = ProgramOptions(
             name="cuslines",
             use_fast_math=True,
             std="c++17",
-            define_macro=[f"{k}={v}" if v is not None else k for k, v in macros],
+            define_macro=[f"{k}={v}" if v is not None else k for k, v in self.macros.items()],
             include_path=[
                 str(cuslines_cuda),
                 find_nvidia_header_directory("cudart"),
@@ -285,17 +291,9 @@ class BootDirectionGetter(GPUDirectionGetter):
             config,
             ker,
             self.model_type,
-            sp.gpu_tracker.max_angle,
             self.min_signal,
-            sp.gpu_tracker.relative_peak_thresh,
-            sp.gpu_tracker.min_separation_angle,
-            sp.gpu_tracker.rng_seed,
             nseeds_gpu,
             sp.seeds_d[n],
-            sp.gpu_tracker.dimx,
-            sp.gpu_tracker.dimy,
-            sp.gpu_tracker.dimz,
-            sp.gpu_tracker.dimt,
             sp.gpu_tracker.dataf_d[n],
             self.H_d[n],
             self.R_d[n],
@@ -303,11 +301,9 @@ class BootDirectionGetter(GPUDirectionGetter):
             self.delta_b_d[n],
             self.delta_q_d[n],
             self.b0s_mask_d[n],
-            sp.gpu_tracker.samplm_nr,
             self.sampling_matrix_d[n],
             sp.gpu_tracker.sphere_vertices_d[n],
             sp.gpu_tracker.sphere_edges_d[n],
-            sp.gpu_tracker.nedges,
             sp.shDirTemp0_d[n],
             sp.slinesOffs_d[n],
         )
@@ -321,21 +317,13 @@ class BootDirectionGetter(GPUDirectionGetter):
             sp.gpu_tracker.streams[n],
             config,
             ker,
-            sp.gpu_tracker.max_angle,
-            sp.gpu_tracker.tc_threshold,
-            sp.gpu_tracker.step_size,
-            sp.gpu_tracker.relative_peak_thresh,
-            sp.gpu_tracker.min_separation_angle,
-            sp.gpu_tracker.rng_seed,
             sp.gpu_tracker.rng_offset + n * nseeds_gpu,
             nseeds_gpu,
             sp.seeds_d[n],
             sp.gpu_tracker.dataf_d[n],
             sp.gpu_tracker.metric_map_d[n].getPtr(),
-            sp.gpu_tracker.samplm_nr,
             sp.gpu_tracker.sphere_vertices_d[n],
             sp.gpu_tracker.sphere_edges_d[n],
-            sp.gpu_tracker.nedges,
             self.min_signal,
             self.delta_nr,
             self.H_d[n],
@@ -375,16 +363,11 @@ class ProbDirectionGetter(GPUDirectionGetter):
             sp.gpu_tracker.streams[n],
             config,
             ker,
-            sp.gpu_tracker.max_angle,
-            sp.gpu_tracker.relative_peak_thresh,
-            sp.gpu_tracker.min_separation_angle,
-            sp.gpu_tracker.rng_seed,
             nseeds_gpu,
             sp.seeds_d[n],
             dataf_d_n,
             sp.gpu_tracker.sphere_vertices_d[n],
             sp.gpu_tracker.sphere_edges_d[n],
-            sp.gpu_tracker.nedges,
             sp.shDirTemp0_d[n],
             sp.slinesOffs_d[n],
         )
@@ -398,21 +381,13 @@ class ProbDirectionGetter(GPUDirectionGetter):
             sp.gpu_tracker.streams[n],
             config,
             ker,
-            sp.gpu_tracker.max_angle,
-            sp.gpu_tracker.tc_threshold,
-            sp.gpu_tracker.step_size,
-            sp.gpu_tracker.relative_peak_thresh,
-            sp.gpu_tracker.min_separation_angle,
-            sp.gpu_tracker.rng_seed,
             sp.gpu_tracker.rng_offset + n * nseeds_gpu,
             nseeds_gpu,
             sp.seeds_d[n],
             sp.gpu_tracker.dataf_d[n],
             sp.gpu_tracker.metric_map_d[n].getPtr(),
-            sp.gpu_tracker.samplm_nr,
             sp.gpu_tracker.sphere_vertices_d[n],
             sp.gpu_tracker.sphere_edges_d[n],
-            sp.gpu_tracker.nedges,
             sp.slinesOffs_d[n],
             sp.shDirTemp0_d[n],
             sp.slineSeed_d[n],
@@ -422,7 +397,22 @@ class ProbDirectionGetter(GPUDirectionGetter):
 
 
 class PttDirectionGetter(ProbDirectionGetter):
-    def __init__(self, odf_lut_res: int = 128):
+    def __init__(self, odf_lut_res: int = 128, probe_frac: int = 2, probe_quality: int = 4):
+        """
+        Use Parallel Transport Tractography
+
+        Parameters
+        ----------
+        odf_lut_res: int
+            Resolution of the ODF lookup table.
+            Default: 128
+        probe_frac: int
+            Divides output step size (usually 0.5) to find probe length.
+            Default: 2
+        probe_quality : int
+            Number of probing steps.
+            Default: 4
+        """
         checkCudaErrors(driver.cuInit(0))
         self.getnum_kernel_name = f"getNumStreamlinesPtt_k<{THR_X_SL},{BLOCK_Y},{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
         self.genstreamlines_kernel_name = f"genStreamlinesMergeProb_k<{THR_X_SL},{BLOCK_Y},PTT,const cudaTextureObject_t *__restrict__,{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
@@ -430,6 +420,17 @@ class PttDirectionGetter(ProbDirectionGetter):
         self.sphere_vertices_lut_h = None
         self.sphere_vertices_lut_d = []
         self.sphere_vertices_lut_array_d = []
+
+        self.probe_frac = probe_frac
+        self.probe_quality = probe_quality
+
+    def set_macros(self, gpu_tracker):
+        self.macros["LOG2_WIDTH"] = str(int(self.log2_width))
+        self.macros["WIDTH_MASK"] = str(int(self.width_mask))
+        self.macros["PROBE_FRAC"] = str(float(self.probe_frac))
+        self.macros["PROBE_QUALITY"] = str(float(self.probe_quality))
+        self.macros["PROBE_STEP_SIZE"] = str(float(((gpu_tracker.step_size /  self.probe_frac) / (self.probe_quality))))
+        self.macros["MAX_CURVATURE"] = str(float(self.probe_frac * 2.0 * np.sin(gpu_tracker.max_angle / 2.0) / (gpu_tracker.step_size)))
 
     def allocate_on_gpu(self, n):
         if REAL_SIZE != 4:
@@ -551,21 +552,13 @@ class PttDirectionGetter(ProbDirectionGetter):
             sp.gpu_tracker.streams[n],
             config,
             ker,
-            sp.gpu_tracker.max_angle,
-            sp.gpu_tracker.tc_threshold,
-            sp.gpu_tracker.step_size,
-            sp.gpu_tracker.relative_peak_thresh,
-            sp.gpu_tracker.min_separation_angle,
-            sp.gpu_tracker.rng_seed,
             sp.gpu_tracker.rng_offset + n * nseeds_gpu,
             nseeds_gpu,
             sp.seeds_d[n],
             sp.gpu_tracker.dataf_d[n].getPtr(),
             sp.gpu_tracker.metric_map_d[n].getPtr(),
-            sp.gpu_tracker.samplm_nr,
             self.sphere_vertices_lut_d[n].getPtr(),
             sp.gpu_tracker.sphere_edges_d[n],
-            sp.gpu_tracker.nedges,
             sp.slinesOffs_d[n],
             sp.shDirTemp0_d[n],
             sp.slineSeed_d[n],

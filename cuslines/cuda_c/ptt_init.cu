@@ -2,17 +2,11 @@ template<int BDIM_X,
          int BDIM_Y,
          typename REAL_T,
          typename REAL3_T>
-__global__ void getNumStreamlinesPtt_k(
-                                        const REAL_T max_angle,
-				        const REAL_T relative_peak_thres,
-				        const REAL_T min_separation_angle,
-				        const long long rndSeed,
-                                        const int nseed,
+__global__ void getNumStreamlinesPtt_k( const int nseed,
                                         const REAL3_T *__restrict__ seeds,
                                         const cudaTextureObject_t *__restrict__ pmf,
                                         const REAL3_T *__restrict__ sphere_vertices,
                                         const int2 *__restrict__ sphere_edges,
-                                        const int num_edges,
                                         REAL3_T *__restrict__ shDir0,
                                         int *slineOutOff) {
 
@@ -31,7 +25,7 @@ __global__ void getNumStreamlinesPtt_k(
 
         REAL3_T *__restrict__ __shDir = shDir0+slid*DIMT;
         curandStatePhilox4_32_10_t st;
-        curand_init(rndSeed, gid, 0, &st);
+        curand_init(RNG_SEED, gid, 0, &st);
 
         extern __shared__ REAL_T __sh[];
         REAL_T *__pmf_data_sh = __sh + tidy*N32DIMT;
@@ -59,11 +53,7 @@ __global__ void getNumStreamlinesPtt_k(
                     __shDir,
                     sphere_vertices,
                     sphere_edges,
-                    num_edges,
-                    DIMT,
-                    __shInd,
-                    relative_peak_thres,
-                    min_separation_angle);
+                    __shInd);
 
         if (tidx == 0) {
                 slineOutOff[slid] = ndir;

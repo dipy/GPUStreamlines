@@ -53,14 +53,10 @@ template<int BDIM_X,
          typename REAL3_T>
 __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                                     const REAL_T *__restrict__ pmf,
-                                    const REAL_T max_angle,
-                                    const REAL_T relative_peak_thres,
-                                    const REAL_T min_separation_angle,
                                     REAL3_T dir,
                                     const REAL3_T point,
                                     const REAL3_T *__restrict__ sphere_vertices,
                                     const int2 *__restrict__ sphere_edges,
-                                    const int num_edges,
                                     REAL3_T *__restrict__ dirs) {
         const int tidx = threadIdx.x;
         const int tidy = threadIdx.y;
@@ -104,11 +100,7 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                                                  dirs,
                                                  sphere_vertices,
                                                  sphere_edges,
-                                                 num_edges,
-                                                 DIMT,
-                                                 __shInd,
-                                                 relative_peak_thres,
-                                                 min_separation_angle);
+                                                 __shInd);
         } else {
                 REAL_T __tmp;
                 #ifdef DEBUG
@@ -148,7 +140,7 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                 //                 cos_sim = cos_sim * -1
                 //         if cos_sim < self.cos_similarity:
                 //                 pmf[i] = 0
-                const REAL_T cos_similarity = COS(max_angle);
+                const REAL_T cos_similarity = COS(MAX_ANGLE);
 
                 #pragma unroll
                 for(int i = tidx; i < DIMT; i += BDIM_X) {
@@ -291,21 +283,14 @@ template<int BDIM_X,
          typename REAL_T,
          typename REAL3_T>
 __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
-			 const REAL_T max_angle,
-			 const REAL_T tc_threshold,
-			 const REAL_T step_size,
-			 const REAL_T relative_peak_thres,
-			 const REAL_T min_separation_angle,
                          REAL3_T seed,
                          REAL3_T first_step,
                          REAL_T* ptt_frame,
                          REAL3_T voxel_size,
                          DATA_T dataf,
                          const cudaTextureObject_t *__restrict__ metric_map,
-		         const int samplm_nr,
                          DATA_T sphere_vertices,
                          const int2 *__restrict__ sphere_edges,
-                         const int num_edges,
                          int *__restrict__ nsteps,
                          REAL3_T *__restrict__ streamline) {
 
@@ -342,14 +327,10 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                                                     0>(
                                                         st,
                                                         dataf,
-                                                        max_angle,
-                                                        relative_peak_thres,
-                                                        min_separation_angle,
                                                         direction,
                                                         point,
-                                                        (const REAL3_T *__restrict__) sphere_vertices,
+                                                        (REAL3_T *__restrict__) sphere_vertices,
                                                         sphere_edges,
-                                                        num_edges,
                                                         __sh_new_dir + tidy);
                 } else if constexpr (MODEL_T == PTT) {
                         ndir = get_direction_ptt_d<BDIM_X,
@@ -357,8 +338,6 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                                                    0>(
                                                         st,
                                                         dataf,
-                                                        max_angle,
-                                                        step_size,
                                                         direction,
                                                         ptt_frame,
                                                         point,
@@ -379,9 +358,9 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                 //return;
 #endif
 
-                point.x += (direction.x / voxel_size.x) * (step_size / step_frac);
-                point.y += (direction.y / voxel_size.y) * (step_size / step_frac);
-                point.z += (direction.z / voxel_size.z) * (step_size / step_frac);
+                point.x += (direction.x / voxel_size.x) * (STEP_SIZE / step_frac);
+                point.y += (direction.y / voxel_size.y) * (STEP_SIZE / step_frac);
+                point.z += (direction.z / voxel_size.z) * (STEP_SIZE / step_frac);
 
                 if ((tidx == 0) && ((i % step_frac) == 0)){
                         streamline[i/step_frac] = point;
@@ -393,12 +372,12 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                 }
                 __syncwarp(WMASK);
 
-                tissue_class = check_point_d<BDIM_X, BDIM_Y>(tc_threshold, point, metric_map);
+                tissue_class = check_point_d<BDIM_X, BDIM_Y, REAL_T, REAL3_T>(point, metric_map);
 
 #if 0
                 __syncwarp(WMASK);
                 if (tidx == 0) {
-                        printf("step_size %f\n", step_size);
+                        printf("step_size %f\n", STEP_SIZE);
                         printf("direction %f, %f, %f\n", direction.x, direction.y, direction.z);
                         printf("direction addr read %p, slid %i\n", __shDir, blockIdx.x*blockDim.y+threadIdx.y);
                         printf("voxel_size %f, %f, %f\n", voxel_size.x, voxel_size.y, voxel_size.z);
@@ -407,7 +386,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                 }
                 __syncwarp(WMASK);
                 if (tidx == 15) {
-                        printf("step_size %f l15\n", step_size);
+                        printf("step_size %f l15\n", STEP_SIZE);
                         printf("direction %f, %f, %f l15\n", direction.x, direction.y, direction.z);
                         printf("direction addr read %p, slid %i l15\n", __shDir, blockIdx.x*blockDim.y+threadIdx.y);
                         printf("voxel_size %f, %f, %f l15\n", voxel_size.x, voxel_size.y, voxel_size.z);
@@ -416,7 +395,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                 }
                 __syncwarp(WMASK);
                 if (tidx == 31) {
-                        printf("step_size %f l31\n", step_size);
+                        printf("step_size %f l31\n", STEP_SIZE);
                         printf("direction %f, %f, %f l31\n", direction.x, direction.y, direction.z);
                         printf("direction addr read %p, slid %i l31\n", __shDir, blockIdx.x*blockDim.y+threadIdx.y);
                         printf("voxel_size %f, %f, %f l31\n", voxel_size.x, voxel_size.y, voxel_size.z);
@@ -447,16 +426,11 @@ template<int BDIM_X,
          int BDIM_Y,
          typename REAL_T,
          typename REAL3_T>
-__global__ void getNumStreamlinesProb_k(const REAL_T max_angle,
-				        const REAL_T relative_peak_thres,
-				        const REAL_T min_separation_angle,
-				        const long long rndSeed,
-                                        const int nseed,
+__global__ void getNumStreamlinesProb_k(const int nseed,
                                         const REAL3_T *__restrict__ seeds,
                                         const REAL_T *__restrict__ dataf,
                                         const REAL3_T *__restrict__ sphere_vertices,
                                         const int2 *__restrict__ sphere_edges,
-                                        const int num_edges,
                                         REAL3_T *__restrict__ shDir0,
                                         int *slineOutOff) {
 
@@ -470,21 +444,17 @@ __global__ void getNumStreamlinesProb_k(const REAL_T max_angle,
 
         REAL3_T *__restrict__ __shDir = shDir0+slid*DIMT;
         curandStatePhilox4_32_10_t st;
-        curand_init(rndSeed, gid, 0, &st);
+        curand_init(RNG_SEED, gid, 0, &st);
 
         int ndir = get_direction_prob_d<BDIM_X,
                                         BDIM_Y,
                                         1>(
                                                 &st,
                                                 dataf,
-                                                max_angle,
-                                                relative_peak_thres,
-                                                min_separation_angle,
                                                 MAKE_REAL3(0,0,0),
                                                 seeds[slid],
                                                 sphere_vertices,
                                                 sphere_edges,
-                                                num_edges,
                                                 __shDir);
         if (tidx == 0) {
                 slineOutOff[slid] = ndir;
@@ -500,21 +470,13 @@ template<int BDIM_X,
          typename REAL_T,
          typename REAL3_T>
 __global__ void genStreamlinesMergeProb_k(
-				      const REAL_T max_angle,
-				      const REAL_T tc_threshold,
-				      const REAL_T step_size,
-				      const REAL_T relative_peak_thres,
-				      const REAL_T min_separation_angle,
-				      const long long rndSeed,
                                       const int rndOffset,
                                       const int nseed,
                                       const REAL3_T *__restrict__ seeds,
                                       DATA_T dataf,
                                       const cudaTextureObject_t *__restrict__ metric_map,
-				      const int samplm_nr,
                                       DATA_T sphere_vertices,
                                       const int2 *__restrict__ sphere_edges,
-                                      const int num_edges,
                                       const int    *__restrict__ slineOutOff,
                                             REAL3_T *__restrict__ shDir0,
                                             int     *__restrict__ slineSeed,
@@ -536,8 +498,8 @@ __global__ void genStreamlinesMergeProb_k(
         curandStatePhilox4_32_10_t st;
         // const int gbid = blockIdx.y*gridDim.x + blockIdx.x;
         const size_t gid = blockIdx.x * blockDim.y * blockDim.x + blockDim.x * threadIdx.y + threadIdx.x;
-        //curand_init(rndSeed, slid+rndOffset, DIV_UP(hr_side, BDIM_X)*tidx, &st); // each thread uses DIV_UP(HR_SIDE/BDIM_X)
-        curand_init(rndSeed, gid+1, 0, &st); // each thread uses DIV_UP(hr_side/BDIM_X)
+        //curand_init(RNG_SEED, slid+rndOffset, DIV_UP(hr_side, BDIM_X)*tidx, &st); // each thread uses DIV_UP(HR_SIDE/BDIM_X)
+        curand_init(RNG_SEED, gid+1, 0, &st); // each thread uses DIV_UP(hr_side/BDIM_X)
                                                                                  // elements of the same sequence
         if (slid >= nseed) {
                 return;
@@ -560,7 +522,7 @@ __global__ void genStreamlinesMergeProb_k(
         int slineOff = slineOutOff[slid];
 
         for(int i = 0; i < ndir; i++) {
-                REAL3_T first_step = shDir0[slid*samplm_nr + i];
+                REAL3_T first_step = shDir0[slid*SAMPLM_NR + i];
 
 		REAL3_T *__restrict__ currSline = sline + slineOff*MAX_SLINE_LEN*2;
 
@@ -577,8 +539,6 @@ __global__ void genStreamlinesMergeProb_k(
                         if (!init_frame_ptt_d<BDIM_X, BDIM_Y>(
                                 &st,
                                 (cudaTextureObject_t*) dataf,
-                                max_angle,
-                                step_size,
                                 first_step,
                                 seed,
                                 (cudaTextureObject_t*) sphere_vertices,
@@ -600,21 +560,14 @@ __global__ void genStreamlinesMergeProb_k(
                                                     BDIM_Y,
                                                     MODEL_T,
                                                     DATA_T>(&st,
-		                		             max_angle,
-			        			     tc_threshold,
-	                        			     step_size,
-	                        			     relative_peak_thres,
-	                        			     min_separation_angle,
                                                              seed,
                                                              MAKE_REAL3(-first_step.x, -first_step.y, -first_step.z),
                                                              __ptt_frame,
                                                              MAKE_REAL3(1, 1, 1),
                                                              dataf,
                                                              metric_map,
-		                			     samplm_nr,
                                                              sphere_vertices,
                                                              sphere_edges,
-                                                             num_edges,
                                                              &stepsB,
                                                              currSline);
                 //if (tidx == 0) {
@@ -635,21 +588,14 @@ __global__ void genStreamlinesMergeProb_k(
                                                     BDIM_Y,
                                                     MODEL_T,
                                                     DATA_T>(&st,
-     	                    			             max_angle,
-		        				     tc_threshold,
-	                				     step_size,
-			    				     relative_peak_thres,
-			            			     min_separation_angle,
                                                              seed,
                                                              first_step,
                                                              __ptt_frame + 9,
                                                              MAKE_REAL3(1, 1, 1),
                                                              dataf,
                                                              metric_map,
-			        			     samplm_nr,
                                                              sphere_vertices,
                                                              sphere_edges,
-                                                             num_edges,
                                                              &stepsF,
                                                              currSline + stepsB-1);
                 if (tidx == 0) {

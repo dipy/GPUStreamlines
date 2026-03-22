@@ -64,8 +64,7 @@ template<int BDIM_X,
          int BDIM_Y,
          typename REAL_T,
          typename REAL3_T>
-__device__ int check_point_d(const REAL_T tc_threshold,
-			     const REAL3_T point,
+__device__ int check_point_d(const REAL3_T point,
                              const cudaTextureObject_t *__restrict__ metric_map) {
     float val = tex3D<float>(*metric_map, (float) point.z, (float) point.y, (float) point.x);
 
@@ -73,7 +72,7 @@ __device__ int check_point_d(const REAL_T tc_threshold,
         return OUTSIDEIMAGE;
     }
 
-    return (val > tc_threshold) ? TRACKPOINT : ENDPOINT;
+    return (val > TC_THRESHOLD) ? TRACKPOINT : ENDPOINT;
 }
 
 template<int BDIM_X,
@@ -84,11 +83,7 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
                                        REAL3_T *__restrict__ dirs,
                                  const REAL3_T *__restrict__ sphere_vertices,
                                  const int2 *__restrict__ sphere_edges,
-                                 const int num_edges,
-				 int samplm_nr,
-				 int *__restrict__ __shInd,
-				 const REAL_T relative_peak_thres,
-				 const REAL_T min_separation_angle) {
+				 int *__restrict__ __shInd) {
 
         const int tidx = threadIdx.x;
 
@@ -100,11 +95,11 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
 //        __shared__ int __shInd[BDIM_Y][SAMPLM_NR];
 
         #pragma unroll
-        for(int j = tidx; j < samplm_nr; j += BDIM_X) {
+        for(int j = tidx; j < SAMPLM_NR; j += BDIM_X) {
 		__shInd[j] = 0;
         }
 
-        REAL_T odf_min = min_d<BDIM_X>(samplm_nr, odf, REAL_MAX);
+        REAL_T odf_min = min_d<BDIM_X>(SAMPLM_NR, odf, REAL_MAX);
         odf_min = MAX(0, odf_min);
 
         __syncwarp(WMASK);
@@ -113,8 +108,8 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
         // selecting only the indices corrisponding to maxima Ms
         // such that M-odf_min >= relative_peak_thres
         //#pragma unroll
-        for(int j = 0; j < num_edges; j += BDIM_X) {
-                if (j+tidx < num_edges) {
+        for(int j = 0; j < NUM_EDGES; j += BDIM_X) {
+                if (j+tidx < NUM_EDGES) {
                         const int u_ind = sphere_edges[j+tidx].x;
                         const int v_ind = sphere_edges[j+tidx].y;
 
@@ -140,7 +135,7 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
         }
         __syncwarp(WMASK);
 
-        const REAL_T compThres = relative_peak_thres*max_mask_transl_d<BDIM_X>(samplm_nr, __shInd, odf, -odf_min, REAL_MIN);
+        const REAL_T compThres = RELATIVE_PEAK_THRESH*max_mask_transl_d<BDIM_X>(SAMPLM_NR, __shInd, odf, -odf_min, REAL_MIN);
 #if 1
 /*
         if (!tidy && !tidx) {
@@ -154,9 +149,9 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
         // compact indices of positive values to the right
         int n = 0;
 
-        for(int j = 0; j < samplm_nr; j += BDIM_X) {
+        for(int j = 0; j < SAMPLM_NR; j += BDIM_X) {
 
-                const int __v = (j+tidx < samplm_nr) ? __shInd[j+tidx] : -1;
+                const int __v = (j+tidx < SAMPLM_NR) ? __shInd[j+tidx] : -1;
                 const int __keep = (__v > 0) && ((odf[j+tidx]-odf_min) >= compThres);
                 const int __msk = __ballot_sync(WMASK, __keep);
 
@@ -203,7 +198,7 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
                 // remove_similar_vertices()
                 // PRELIMINARY INEFFICIENT, SINGLE TH, IMPLEMENTATION
                 if (tidx == 0) {
-                        const REAL_T cos_similarity = COS(min_separation_angle);
+                        const REAL_T cos_similarity = COS(MIN_SEPARATION_ANGLE);
 
                         dirs[0] = sphere_vertices[__shInd[0]];
 
