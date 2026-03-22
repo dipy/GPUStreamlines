@@ -9,8 +9,7 @@ target-version = "py313"
 include = [
     "cuslines/cuda_python/*.py"]
 exclude = ["docs/source/conf.py",
-         "examples/",
-         "setup.py"]
+         "examples/"]
 
 [tool.ruff.lint]
 select = [
@@ -46,6 +45,12 @@ dependencies = [
     "trx-python",
     "scipy",
 ]
+
+[project.urls]
+Homepage = "https://github.com/dipy/GPUStreamlines"
+
+[tool.setuptools.package-data]
+cuslines = ["cuda_c/*", "metal_shaders/*", "wgsl_shaders/*"]
 
 [project.optional-dependencies]
 cu13 = [

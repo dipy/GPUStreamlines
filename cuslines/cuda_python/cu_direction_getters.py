@@ -22,6 +22,13 @@ from cuslines.cuda_python.cutils import (
     THR_X_SL,
     ModelType,
     checkCudaErrors,
+    EXCESS_ALLOC_FACT,
+    MAX_SLINES_PER_SEED,
+    MAX_SLINE_LEN,
+    PMF_THRESHOLD_P,
+    REAL_SIZE,
+    THR_X_BL,
+    THR_X_SL,
 )
 
 logger = logging.getLogger("GPUStreamlines")
@@ -77,12 +84,21 @@ class GPUDirectionGetter(ABC):
             "RNG_SEED": str(int(gpu_tracker.rng_seed)),
             "SAMPLM_NR": str(int(gpu_tracker.samplm_nr)),
             "NUM_EDGES": str(int(gpu_tracker.nedges)),
+            "EXCESS_ALLOC_FACT": str(int(EXCESS_ALLOC_FACT)),
+            "MAX_SLINES_PER_SEED": str(int(MAX_SLINES_PER_SEED)),
+            "MAX_SLINE_LEN": str(int(MAX_SLINE_LEN)),
+            "PMF_THRESHOLD_P": str(float(PMF_THRESHOLD_P)),
+            "REAL_SIZE": str(int(REAL_SIZE)),
+            "THR_X_BL": str(int(THR_X_BL)),
+            "THR_X_SL": str(int(THR_X_SL)),
         }
         self.set_macros(gpu_tracker)
         optional_macros = ["log2_width", "width_mask", "probe_step_size", "max_curvature", "probe_quality", "probe_frac"]
         for name in optional_macros:
             if name.upper() not in self.macros:
                 self.macros[name.upper()] = "0"
+        if debug:
+            self.macros["DEBUG"] = None
 
         program_options = ProgramOptions(
             name="cuslines",
