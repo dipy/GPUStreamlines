@@ -1,25 +1,24 @@
-import numpy as np
-import math
 import gc
+import logging
+import math
+
+import numpy as np
 from cuda.bindings import runtime
 from cuda.bindings.runtime import cudaMemcpyKind
-
-from nibabel.streamlines.array_sequence import ArraySequence, MEGABYTE
-import logging
+from nibabel.streamlines.array_sequence import MEGABYTE, ArraySequence
 
 from cuslines.cuda_python.cutils import (
-    REAL_SIZE,
-    REAL_DTYPE,
-    REAL3_DTYPE,
-    MAX_SLINE_LEN,
-    EXCESS_ALLOC_FACT,
-    THR_X_SL,
-    THR_X_BL,
     DEV_PTR,
-    div_up,
+    EXCESS_ALLOC_FACT,
+    MAX_SLINE_LEN,
+    REAL3_DTYPE,
+    REAL_DTYPE,
+    REAL_SIZE,
+    THR_X_BL,
+    THR_X_SL,
     checkCudaErrors,
+    div_up,
 )
-
 
 logger = logging.getLogger("GPUStreamlines")
 
@@ -260,6 +259,4 @@ class SeedBatchPropagator:
         return _yield_slines()
 
     def as_array_sequence(self):
-        return ArraySequence(
-            self.as_generator(),
-            self.get_buffer_size())
+        return ArraySequence(self.as_generator(), self.get_buffer_size())

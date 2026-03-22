@@ -57,10 +57,6 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                                     const REAL_T relative_peak_thres,
                                     const REAL_T min_separation_angle,
                                     REAL3_T dir,
-                                    const int dimx,
-                                    const int dimy,
-                                    const int dimz,
-                                    const int dimt,
                                     const REAL3_T point,
                                     const REAL3_T *__restrict__ sphere_vertices,
                                     const int2 *__restrict__ sphere_edges,
@@ -72,14 +68,12 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
         const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
         const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
 
-	const int n32dimt = ((dimt+31)/32)*32;
-
 	extern __shared__ REAL_T __sh[];
-        REAL_T *__pmf_data_sh = __sh + tidy*n32dimt;
+        REAL_T *__pmf_data_sh = __sh + tidy*N32DIMT;
 
         // pmf = self.pmf_gen.get_pmf_c(&point[0], pmf)
         __syncwarp(WMASK);
-        const int rv = trilinear_interp_d<BDIM_X>(dimx, dimy, dimz, dimt, -1, pmf, point, __pmf_data_sh);
+        const int rv = trilinear_interp_d<BDIM_X>(pmf, point, __pmf_data_sh);
         __syncwarp(WMASK);
         if (rv != 0) {
                 return 0;
@@ -89,14 +83,14 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
         //     if pmf[i] > max_pmf:
         //         max_pmf = pmf[i]
         // absolute_pmf_threshold = pmf_threshold * max_pmf
-        const REAL_T absolpmf_thresh = PMF_THRESHOLD_P * max_d<BDIM_X>(dimt, __pmf_data_sh, REAL_MIN);
+        const REAL_T absolpmf_thresh = PMF_THRESHOLD_P * max_d<BDIM_X>(DIMT, __pmf_data_sh, REAL_MIN);
         __syncwarp(WMASK);
 
         // for i in range(_len):
         //     if pmf[i] < absolute_pmf_threshold:
         //         pmf[i] = 0.0
         #pragma unroll
-        for(int i = tidx; i < dimt; i += BDIM_X) {
+        for(int i = tidx; i < DIMT; i += BDIM_X) {
                 if (__pmf_data_sh[i] < absolpmf_thresh) {
                         __pmf_data_sh[i] = 0.0;
                 }
@@ -104,14 +98,14 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
         __syncwarp(WMASK);
 
         if (IS_START) {
-                int *__shInd = reinterpret_cast<int *>(__sh + BDIM_Y*n32dimt) + tidy*n32dimt;
+                int *__shInd = reinterpret_cast<int *>(__sh + BDIM_Y*N32DIMT) + tidy*N32DIMT;
                 return peak_directions_d<BDIM_X,
                                          BDIM_Y>(__pmf_data_sh,
                                                  dirs,
                                                  sphere_vertices,
                                                  sphere_edges,
                                                  num_edges,
-                                                 dimt,
+                                                 DIMT,
                                                  __shInd,
                                                  relative_peak_thres,
                                                  min_separation_angle);
@@ -120,7 +114,7 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                 #ifdef DEBUG
                         __syncwarp(WMASK);
                         if (tidx == 0) {
-                                printArray("__pmf_data_sh initial", 8, dimt, __pmf_data_sh);
+                                printArray("__pmf_data_sh initial", 8, DIMT, __pmf_data_sh);
                                 printf("absolpmf_thresh %10.8f\n", absolpmf_thresh);
                                 printf("--->            dir %10.8f, %10.8f, %10.8f\n", dir.x, dir.y, dir.z);
                                 printf("--->            point %10.8f, %10.8f, %10.8f\n", point.x, point.y, point.z);
@@ -133,7 +127,7 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                         }
                         __syncwarp(WMASK);
                         if (tidx == 31) {
-                                printArray("__pmf_data_sh initial l31", 8, dimt, __pmf_data_sh);
+                                printArray("__pmf_data_sh initial l31", 8, DIMT, __pmf_data_sh);
                                 printf("absolpmf_thresh %10.8f l31\n", absolpmf_thresh);
                                 printf("--->            dir %10.8f, %10.8f, %10.8f l31\n", dir.x, dir.y, dir.z);
                                 printf("--->            point %10.8f, %10.8f, %10.8f l31\n", point.x, point.y, point.z);
@@ -157,7 +151,7 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                 const REAL_T cos_similarity = COS(max_angle);
 
                 #pragma unroll
-                for(int i = tidx; i < dimt; i += BDIM_X) {
+                for(int i = tidx; i < DIMT; i += BDIM_X) {
                         const REAL_T dot = dir.x*sphere_vertices[i].x+
                                            dir.y*sphere_vertices[i].y+
                                            dir.z*sphere_vertices[i].z;
@@ -171,18 +165,18 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                 #ifdef DEBUG
                         __syncwarp(WMASK);
                         if (tidx == 0) {
-                                printArray("__pmf_data_sh after filtering", 8, dimt, __pmf_data_sh);
+                                printArray("__pmf_data_sh after filtering", 8, DIMT, __pmf_data_sh);
                         }
                         __syncwarp(WMASK);
                 #endif
 
                 // cumsum(pmf, pmf, _len)
-                prefix_sum_sh_d<BDIM_X>(__pmf_data_sh, dimt);
+                prefix_sum_sh_d<BDIM_X>(__pmf_data_sh, DIMT);
 
                 #ifdef DEBUG
                         __syncwarp(WMASK);
                         if (tidx == 0) {
-                                printArray("__pmf_data_sh after cumsum", 8, dimt, __pmf_data_sh);
+                                printArray("__pmf_data_sh after cumsum", 8, DIMT, __pmf_data_sh);
                         }
                         __syncwarp(WMASK);
                 #endif
@@ -190,7 +184,7 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                 // last_cdf = pmf[_len - 1]
                 // if last_cdf == 0:
                 //         return 1
-                REAL_T last_cdf = __pmf_data_sh[dimt - 1];
+                REAL_T last_cdf = __pmf_data_sh[DIMT - 1];
                 if (last_cdf == 0) {
                         return 0;
                 }
@@ -203,7 +197,7 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
 // Both these implementations work
 #if 1
                 int low = 0;
-                int high = dimt - 1;
+                int high = DIMT - 1;
                 while ((high - low) >= BDIM_X) {
                         const int mid = (low + high) / 2;
                         if (__pmf_data_sh[mid] < selected_cdf) {
@@ -216,10 +210,10 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                 const int __msk = __ballot_sync(WMASK, __ballot);
                 const int indProb = low + __ffs(__msk) - 1;
 #else
-                int indProb = dimt - 1;
-                for (int ii = 0; ii < dimt; ii+=BDIM_X) {
+                int indProb = DIMT - 1;
+                for (int ii = 0; ii < DIMT; ii+=BDIM_X) {
                         int __is_greater = 0;
-                        if (ii+tidx < dimt) {
+                        if (ii+tidx < DIMT) {
                                 __is_greater = selected_cdf < __pmf_data_sh[ii+tidx];
                         }
                         const int __msk = __ballot_sync(WMASK, __is_greater);
@@ -235,7 +229,7 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                         if (tidx == 0) {
                                 printf("last_cdf %10.8f\n", last_cdf);
                                 printf("selected_cdf %10.8f\n", selected_cdf);
-                                printf("indProb %i out of %i\n", indProb, dimt);
+                                printf("indProb %i out of %i\n", indProb, DIMT);
                         }
                         __syncwarp(WMASK);
                 #endif
@@ -270,19 +264,19 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                         if (tidx == 0) {
                                 printf("last_cdf %10.8f\n", last_cdf);
                                 printf("selected_cdf %10.8f\n", selected_cdf);
-                                printf("indProb %i out of %i\n", indProb, dimt);
+                                printf("indProb %i out of %i\n", indProb, DIMT);
                         }
                         __syncwarp(WMASK);
                         if (tidx == 15) {
                                 printf("last_cdf %10.8f l15\n", last_cdf);
                                 printf("selected_cdf %10.8f l15\n", selected_cdf);
-                                printf("indProb %i out of %i l15\n", indProb, dimt);
+                                printf("indProb %i out of %i l15\n", indProb, DIMT);
                         }
                         __syncwarp(WMASK);
                         if (tidx == 31) {
                                 printf("last_cdf %10.8f l31\n", last_cdf);
                                 printf("selected_cdf %10.8f l31\n", selected_cdf);
-                                printf("indProb %i out of %i l31\n", indProb, dimt);
+                                printf("indProb %i out of %i l31\n", indProb, DIMT);
                         }
                         __syncwarp(WMASK);
                 #endif
@@ -306,12 +300,8 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                          REAL3_T first_step,
                          REAL_T* ptt_frame,
                          REAL3_T voxel_size,
-                         const int dimx,
-                         const int dimy,
-                         const int dimz,
-                         const int dimt,
                          DATA_T dataf,
-                         const REAL_T *__restrict__ metric_map,
+                         const cudaTextureObject_t *__restrict__ metric_map,
 		         const int samplm_nr,
                          DATA_T sphere_vertices,
                          const int2 *__restrict__ sphere_edges,
@@ -356,7 +346,6 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                                                         relative_peak_thres,
                                                         min_separation_angle,
                                                         direction,
-                                                        dimx, dimy, dimz, dimt,
                                                         point,
                                                         (const REAL3_T *__restrict__) sphere_vertices,
                                                         sphere_edges,
@@ -372,7 +361,6 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                                                         step_size,
                                                         direction,
                                                         ptt_frame,
-                                                        dimx, dimy, dimz, dimt,
                                                         point,
                                                         sphere_vertices,
                                                         __sh_new_dir + tidy);
@@ -405,7 +393,7 @@ __device__ int tracker_d(curandStatePhilox4_32_10_t *st,
                 }
                 __syncwarp(WMASK);
 
-                tissue_class = check_point_d<BDIM_X, BDIM_Y>(tc_threshold, point, dimx, dimy, dimz, metric_map);
+                tissue_class = check_point_d<BDIM_X, BDIM_Y>(tc_threshold, point, metric_map);
 
 #if 0
                 __syncwarp(WMASK);
@@ -465,10 +453,6 @@ __global__ void getNumStreamlinesProb_k(const REAL_T max_angle,
 				        const long long rndSeed,
                                         const int nseed,
                                         const REAL3_T *__restrict__ seeds,
-                                        const int dimx,
-                                        const int dimy,
-                                        const int dimz,
-                                        const int dimt,
                                         const REAL_T *__restrict__ dataf,
                                         const REAL3_T *__restrict__ sphere_vertices,
                                         const int2 *__restrict__ sphere_edges,
@@ -484,7 +468,7 @@ __global__ void getNumStreamlinesProb_k(const REAL_T max_angle,
                 return;
         }
 
-        REAL3_T *__restrict__ __shDir = shDir0+slid*dimt;
+        REAL3_T *__restrict__ __shDir = shDir0+slid*DIMT;
         curandStatePhilox4_32_10_t st;
         curand_init(rndSeed, gid, 0, &st);
 
@@ -497,7 +481,6 @@ __global__ void getNumStreamlinesProb_k(const REAL_T max_angle,
                                                 relative_peak_thres,
                                                 min_separation_angle,
                                                 MAKE_REAL3(0,0,0),
-                                                dimx, dimy, dimz, dimt,
                                                 seeds[slid],
                                                 sphere_vertices,
                                                 sphere_edges,
@@ -526,12 +509,8 @@ __global__ void genStreamlinesMergeProb_k(
                                       const int rndOffset,
                                       const int nseed,
                                       const REAL3_T *__restrict__ seeds,
-                                      const int dimx,
-                                      const int dimy,
-                                      const int dimz,
-                                      const int dimt,
                                       DATA_T dataf,
-                                      const REAL_T *__restrict__ metric_map,
+                                      const cudaTextureObject_t *__restrict__ metric_map,
 				      const int samplm_nr,
                                       DATA_T sphere_vertices,
                                       const int2 *__restrict__ sphere_edges,
@@ -552,7 +531,7 @@ __global__ void genStreamlinesMergeProb_k(
 
         __shared__ REAL_T frame_sh[((MODEL_T == PTT) ? BDIM_Y*18 : 1)]; // Only used by PTT, TODO: way to remove this in other cases
         REAL_T* __ptt_frame = frame_sh + tidy*18;
-	// const int hr_side = dimt-1;
+	// const int hr_side = DIMT-1;
 
         curandStatePhilox4_32_10_t st;
         // const int gbid = blockIdx.y*gridDim.x + blockIdx.x;
@@ -601,7 +580,6 @@ __global__ void genStreamlinesMergeProb_k(
                                 max_angle,
                                 step_size,
                                 first_step,
-                                dimx, dimy, dimz, dimt,
                                 seed,
                                 (cudaTextureObject_t*) sphere_vertices,
                                 __ptt_frame
@@ -631,7 +609,7 @@ __global__ void genStreamlinesMergeProb_k(
                                                              MAKE_REAL3(-first_step.x, -first_step.y, -first_step.z),
                                                              __ptt_frame,
                                                              MAKE_REAL3(1, 1, 1),
-                                                             dimx, dimy, dimz, dimt, dataf,
+                                                             dataf,
                                                              metric_map,
 		                			     samplm_nr,
                                                              sphere_vertices,
@@ -666,7 +644,7 @@ __global__ void genStreamlinesMergeProb_k(
                                                              first_step,
                                                              __ptt_frame + 9,
                                                              MAKE_REAL3(1, 1, 1),
-                                                             dimx, dimy, dimz, dimt, dataf,
+                                                             dataf,
                                                              metric_map,
 			        			     samplm_nr,
                                                              sphere_vertices,

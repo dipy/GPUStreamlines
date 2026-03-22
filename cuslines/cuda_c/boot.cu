@@ -405,10 +405,6 @@ __device__ int get_direction_boot_d(
                                 const REAL_T relative_peak_thres,
                                 const REAL_T min_separation_angle,
                                 REAL3_T dir,
-                                const int dimx,
-                                const int dimy,
-                                const int dimz,
-                                const int dimt,
                                 const REAL_T *__restrict__ dataf,
                                 const int *__restrict__ b0s_mask, // not using this (and its opposite, dwi_mask)
                                                                   // but not clear if it will never be needed so
@@ -436,25 +432,23 @@ __device__ int get_direction_boot_d(
         const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
         const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
 
-	const int n32dimt = ((dimt+31)/32)*32;
-
 	extern REAL_T __shared__ __sh[];
 
 	REAL_T *__vox_data_sh = reinterpret_cast<REAL_T *>(__sh);
-	REAL_T *__msk_data_sh = __vox_data_sh + BDIM_Y*n32dimt;
+	REAL_T *__msk_data_sh = __vox_data_sh + BDIM_Y*N32DIMT;
 
-	REAL_T *__r_sh = __msk_data_sh + BDIM_Y*n32dimt;
-	REAL_T *__h_sh = __r_sh + BDIM_Y*MAX(n32dimt, samplm_nr);
+	REAL_T *__r_sh = __msk_data_sh + BDIM_Y*N32DIMT;
+	REAL_T *__h_sh = __r_sh + BDIM_Y*MAX(N32DIMT, samplm_nr);
 
-	__vox_data_sh += tidy*n32dimt;
-	__msk_data_sh += tidy*n32dimt;
+	__vox_data_sh += tidy*N32DIMT;
+	__msk_data_sh += tidy*N32DIMT;
 
-	__r_sh += tidy*MAX(n32dimt, samplm_nr);
-	__h_sh += tidy*MAX(n32dimt, samplm_nr);
-	
+	__r_sh += tidy*MAX(N32DIMT, samplm_nr);
+	__h_sh += tidy*MAX(N32DIMT, samplm_nr);
+
 	// compute hr_side (may be passed from python)
 	int hr_side = 0;
-	for(int j = tidx; j < dimt; j += BDIM_X) {
+	for(int j = tidx; j < DIMT; j += BDIM_X) {
 		hr_side += !b0s_mask[j] ? 1 : 0;
 	}
         #pragma unroll
@@ -465,15 +459,15 @@ __device__ int get_direction_boot_d(
         #pragma unroll
         for(int i = 0; i < NATTEMPTS; i++) {
 
-                const int rv = trilinear_interp_d<BDIM_X>(dimx, dimy, dimz, dimt, -1, dataf, point, __vox_data_sh);
+                const int rv = trilinear_interp_d<BDIM_X>(dataf, point, __vox_data_sh);
 
-		const int nmsk = maskGet<BDIM_X>(dimt, b0s_mask, __vox_data_sh, __msk_data_sh);
+		const int nmsk = maskGet<BDIM_X>(DIMT, b0s_mask, __vox_data_sh, __msk_data_sh);
 
 		//if (!tidx && !threadIdx.y && !blockIdx.x) {
 		//
 		//	printf("interp of %f, %f, %f\n", point.x, point.y, point.z);
 		//	printf("hr_side: %d\n", hr_side);
-		//	printArray("vox_data", 6, dimt, __vox_data_sh[tidy]);
+		//	printArray("vox_data", 6, DIMT, __vox_data_sh[tidy]);
 		//	printArray("msk_data", 6, nmsk, __msk_data_sh[tidy]);
 		//}
 		//break;
@@ -513,21 +507,21 @@ __device__ int get_direction_boot_d(
 			//__syncwarp();
 		
 			// vox_data[dwi_mask] = masked_data
-			maskPut<BDIM_X>(dimt, b0s_mask, __h_sh, __vox_data_sh);
+			maskPut<BDIM_X>(DIMT, b0s_mask, __h_sh, __vox_data_sh);
 			__syncwarp(WMASK);
 
-			//printArray("vox_data[dwi_mask]:", 6, dimt, __vox_data_sh[tidy]);
+			//printArray("vox_data[dwi_mask]:", 6, DIMT, __vox_data_sh[tidy]);
 			//__syncwarp();
 
-			for(int j = tidx; j < dimt; j += BDIM_X) {
+			for(int j = tidx; j < DIMT; j += BDIM_X) {
 				//__vox_data_sh[j] = MAX(MIN_SIGNAL_P, __vox_data_sh[j]);
 				__vox_data_sh[j] = MAX(min_signal, __vox_data_sh[j]);
 			}
 			__syncwarp(WMASK);
 
-			const REAL_T denom = avgMask<BDIM_X>(dimt, b0s_mask, __vox_data_sh);
+			const REAL_T denom = avgMask<BDIM_X>(b0s_mask, __vox_data_sh);
 
-			for(int j = tidx; j < dimt; j += BDIM_X) {
+			for(int j = tidx; j < DIMT; j += BDIM_X) {
 				__vox_data_sh[j] /= denom;
 			}
 			__syncwarp();
@@ -539,11 +533,11 @@ __device__ int get_direction_boot_d(
 			//if (!tidx && !threadIdx.y && !blockIdx.x) {
 			//
 			//	printf("__vox_data_sh:\n");
-			//	printArray("vox_data", 6, dimt, __vox_data_sh[tidy]);
+			//	printArray("vox_data", 6, DIMT, __vox_data_sh[tidy]);
 			//}
 			//break;
 
-			maskGet<BDIM_X>(dimt, b0s_mask, __vox_data_sh, __msk_data_sh);
+			maskGet<BDIM_X>(DIMT, b0s_mask, __vox_data_sh, __msk_data_sh);
 			__syncwarp(WMASK);
 
                         fit_model_coef<BDIM_X, MODEL_T>(delta_nr, hr_side, delta_q, delta_b, __msk_data_sh, __h_sh, __r_sh);
@@ -644,10 +638,6 @@ __global__ void getNumStreamlinesBoot_k(
 		                    const long long rndSeed,
                                     const int nseed,
                                     const REAL3_T *__restrict__ seeds,
-                                    const int dimx,
-                                    const int dimy,
-                                    const int dimz,
-                                    const int dimt,
                                     const REAL_T *__restrict__ dataf,
                                     const REAL_T *__restrict__ H,
                                     const REAL_T *__restrict__ R,
@@ -676,7 +666,7 @@ __global__ void getNumStreamlinesBoot_k(
 
         REAL3_T *__restrict__ __shDir = shDir0+slid*samplm_nr;
 
-	// const int hr_side = dimt-1;
+	// const int hr_side = DIMT-1;
 
         curandStatePhilox4_32_10_t st;
         //curand_init(rndSeed, slid + rndOffset, DIV_UP(hr_side, BDIM_X)*tidx, &st); // each thread uses DIV_UP(hr_side/BDIM_X)
@@ -704,7 +694,7 @@ __global__ void getNumStreamlinesBoot_k(
                                                 relative_peak_thres,
                                                 min_separation_angle,
                                                 MAKE_REAL3(0,0,0),
-                                                dimx, dimy, dimz, dimt, dataf,
+                                                dataf,
                                                 b0s_mask /* !dwi_mask */,
                                                 seed,
                                                 H, R,
@@ -732,7 +722,7 @@ __global__ void getNumStreamlinesBoot_k(
                                                 relative_peak_thres,
                                                 min_separation_angle,
                                                 MAKE_REAL3(0,0,0),
-                                                dimx, dimy, dimz, dimt, dataf,
+                                                dataf,
                                                 b0s_mask /* !dwi_mask */,
                                                 seed,
                                                 H, R,
@@ -768,24 +758,20 @@ template<int BDIM_X,
          typename REAL3_T>
 __device__ int tracker_boot_d(
                         curandStatePhilox4_32_10_t *st,
-			            const REAL_T max_angle,
-			            const REAL_T tc_threshold,
-			            const REAL_T step_size,
-			            const REAL_T relative_peak_thres,
-			            const REAL_T min_separation_angle,
-                         REAL3_T seed,
-                         REAL3_T first_step,
-                         REAL3_T voxel_size,
-                         const int dimx,
-                         const int dimy,
-                         const int dimz,
-                         const int dimt,
-                         const REAL_T *__restrict__ dataf,
-                         const REAL_T *__restrict__ metric_map,
-		                 const int samplm_nr,
-                         const REAL3_T *__restrict__ sphere_vertices,
-                         const int2 *__restrict__ sphere_edges,
-                         const int num_edges,
+		        const REAL_T max_angle,
+			const REAL_T tc_threshold,
+		        const REAL_T step_size,
+		        const REAL_T relative_peak_thres,
+		        const REAL_T min_separation_angle,
+                        REAL3_T seed,
+                        REAL3_T first_step,
+                        REAL3_T voxel_size,
+                        const REAL_T *__restrict__ dataf,
+                        const cudaTextureObject_t *__restrict__ metric_map,
+		        const int samplm_nr,
+                        const REAL3_T *__restrict__ sphere_vertices,
+                        const int2 *__restrict__ sphere_edges,
+                        const int num_edges,
                         /*BOOT specific params*/
                         const REAL_T min_signal,
                         const int delta_nr,
@@ -835,7 +821,7 @@ __device__ int tracker_boot_d(
                                                         relative_peak_thres,
                                                         min_separation_angle,
                                                         direction,
-                                                        dimx, dimy, dimz, dimt, dataf,
+                                                        dataf,
                                                         b0s_mask /* !dwi_mask */,
                                                         point,
                                                         H, R,
@@ -864,7 +850,7 @@ __device__ int tracker_boot_d(
                 }
                 __syncwarp(WMASK);
 
-                tissue_class = check_point_d<BDIM_X, BDIM_Y>(tc_threshold, point, dimx, dimy, dimz, metric_map);
+                tissue_class = check_point_d<BDIM_X, BDIM_Y>(tc_threshold, point, metric_map);
 
                 if (tissue_class == ENDPOINT ||
                     tissue_class == INVALIDPOINT ||
@@ -898,12 +884,8 @@ __global__ void genStreamlinesMergeBoot_k(
                       const int rndOffset,
                       const int nseed,
                       const REAL3_T *__restrict__ seeds,
-                      const int dimx,
-                      const int dimy,
-                      const int dimz,
-                      const int dimt,
                       const REAL_T *__restrict__ dataf,
-                      const REAL_T *__restrict__ metric_map,
+                      const cudaTextureObject_t *__restrict__ metric_map,
 				      const int samplm_nr,
                       const REAL3_T *__restrict__ sphere_vertices,
                       const int2 *__restrict__ sphere_edges,
@@ -985,7 +967,7 @@ __global__ void genStreamlinesMergeBoot_k(
                                                         seed,
                                                         MAKE_REAL3(-first_step.x, -first_step.y, -first_step.z),
                                                         MAKE_REAL3(1, 1, 1),
-                                                        dimx, dimy, dimz, dimt, dataf,
+                                                        dataf,
                                                         metric_map,
                                                         samplm_nr,
                                                         sphere_vertices,
@@ -1024,9 +1006,9 @@ __global__ void genStreamlinesMergeBoot_k(
                                                         seed,
                                                         first_step,
                                                         MAKE_REAL3(1, 1, 1),
-                                                        dimx, dimy, dimz, dimt, dataf,
+                                                        dataf,
                                                         metric_map,
-			        			                        samplm_nr,
+			        		        samplm_nr,
                                                         sphere_vertices,
                                                         sphere_edges,
                                                         num_edges,

@@ -1,8 +1,9 @@
-from cuda.bindings import driver, nvrtc
+from enum import IntEnum
 
 import numpy as np
-
-from enum import IntEnum
+from cuda.bindings import driver, nvrtc
+from cuda.bindings import runtime
+from cuda.bindings.runtime import cudaMemcpyKind
 
 from cuslines.cuda_python._globals import *
 
@@ -62,3 +63,54 @@ def checkCudaErrors(result):
 
 def div_up(a, b):
     return (a + b - 1) // b
+
+
+def allocate_texture(data, address_mode="clamp"):
+    channelDesc = checkCudaErrors(
+        runtime.cudaCreateChannelDesc(
+            32, 0, 0, 0, runtime.cudaChannelFormatKind.cudaChannelFormatKindFloat
+        )
+    )
+
+    dim0, dim1, dim2 = data.shape
+    extent = runtime.make_cudaExtent(dim2, dim1, dim0)
+    dataf_array = checkCudaErrors(runtime.cudaMalloc3DArray(channelDesc, extent, 0))
+
+    copyParams = runtime.cudaMemcpy3DParms()
+    copyParams.srcPtr = runtime.make_cudaPitchedPtr(
+        data.ctypes.data,
+        dim2 * 4,
+        dim2,
+        dim1,
+    )
+
+    copyParams.dstArray = dataf_array
+    copyParams.extent = extent
+    copyParams.kind = cudaMemcpyKind.cudaMemcpyHostToDevice
+    checkCudaErrors(runtime.cudaMemcpy3D(copyParams))
+
+    resDesc = runtime.cudaResourceDesc()
+    resDesc.resType = runtime.cudaResourceType.cudaResourceTypeArray
+    resDesc.res.array.array = dataf_array
+
+    texDesc = runtime.cudaTextureDesc()
+    if address_mode == "clamp":
+        address_mode = runtime.cudaTextureAddressMode.cudaAddressModeClamp
+    elif address_mode == "border":
+        address_mode = runtime.cudaTextureAddressMode.cudaAddressModeBorder
+        texDesc.borderColor[0] = -1.0;
+        texDesc.borderColor[1] = -1.0;
+        texDesc.borderColor[2] = -1.0;
+    else:
+        raise ValueError(f"Unsupported address_mode: {address_mode}")
+    texDesc.addressMode[0] = address_mode
+    texDesc.addressMode[1] = address_mode
+    texDesc.addressMode[2] = address_mode
+    texDesc.filterMode = runtime.cudaTextureFilterMode.cudaFilterModeLinear
+    texDesc.readMode = runtime.cudaTextureReadMode.cudaReadModeElementType
+    texDesc.normalizedCoords = 0
+
+    texObj = checkCudaErrors(
+        runtime.cudaCreateTextureObject(resDesc, texDesc, None)
+    )
+    return texObj, dataf_array

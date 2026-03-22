@@ -1,7 +1,7 @@
 __device__ __forceinline__ void norm3_d(float *num, int fail_ind) {
     const float inv_scale = rnorm3df(num[0], num[1], num[2]);
 
-    if (inv_scale < PTT_INV_NORM_EPS) {
+    if (isfinite(inv_scale) && inv_scale > 0.0f && inv_scale < PTT_INV_NORM_EPS) {
         num[0] *= inv_scale;
         num[1] *= inv_scale;
         num[2] *= inv_scale;
@@ -21,17 +21,20 @@ __device__ __forceinline__ void crossnorm3_d(float *dest, const float *src1, con
 
 __device__ float interp4_d(const float3 pos, const float* frame,
                            const cudaTextureObject_t *__restrict__ pmf,
-                           const cudaTextureObject_t *__restrict__ sphere_vertices_lut,
-                           const int dimx) {
+                           const cudaTextureObject_t *__restrict__ sphere_vertices_lut) {
     float3 uvw = {  // Map from -1,1 to 0,1 for texture lookup
         fmaf(frame[0], 0.5f, 0.5f),
         fmaf(frame[1], 0.5f, 0.5f),
         fmaf(frame[2], 0.5f, 0.5f)
     };
-    const float closest_odf_idx = tex3D<float>(*sphere_vertices_lut, uvw.z, uvw.y, uvw.x);
+    const int odf_idx = static_cast<int>(tex3D<float>(*sphere_vertices_lut, uvw.z, uvw.y, uvw.x));
 
-    float x_query = (float)(closest_odf_idx * dimx) + pos.x;
-    return tex3D<float>(*pmf, x_query, pos.y, pos.z);
+    const int grid_col = odf_idx & WIDTH_MASK;
+    const int grid_row = odf_idx >> LOG2_WIDTH;
+
+    const float x_query = (float)(grid_col * DIMX) + pos.x;
+    const float y_query = (float)(grid_row * DIMY) + pos.y;
+    return tex3D<float>(*pmf, x_query, y_query, pos.z);
 }
 
 __device__ void prepare_propagator_d(float k1, float k2, float arclength,
@@ -148,7 +151,6 @@ __device__ void propagate_frame_d(float* propagator, float* frame, float* direc)
 
 __device__ float calculate_data_support_d(float support,
                                            const float3 pos, const cudaTextureObject_t *__restrict__ pmf,
-                                           const int dimx, const int dimt,
                                            const float probe_step_size,
                                            const float absolpmf_thresh,
                                            const cudaTextureObject_t *__restrict__ sphere_vertices_lut,
@@ -177,7 +179,7 @@ __device__ float calculate_data_support_d(float support,
 
         const float fod_amp = interp4_d( // This is the most expensive call
             probing_pos, probing_frame, pmf,
-            sphere_vertices_lut, dimx);
+            sphere_vertices_lut);
 
         if (!ALLOW_WEAK_LINK && (fod_amp < absolpmf_thresh)) {
             return 0;
@@ -197,7 +199,6 @@ __device__ int get_direction_ptt_d(
     const float step_size,
     float3 dir,
     float *__frame_sh,
-    const int dimx, const int dimy, const int dimz, const int dimt,
     float3 pos,
     const cudaTextureObject_t *__restrict__ sphere_vertices_lut,
     float3 *__restrict__ dirs) {
@@ -244,7 +245,7 @@ __device__ int get_direction_ptt_d(
 
     const float first_val = interp4_d(
         pos, __frame_sh, pmf,
-        sphere_vertices_lut, dimx);
+        sphere_vertices_lut);
     __syncwarp(WMASK);
 
     // Calculate __vert_pdf_sh
@@ -259,7 +260,7 @@ __device__ int get_direction_ptt_d(
 
         const float this_support = calculate_data_support_d(
             first_val,
-            pos, pmf, dimx, dimt,
+            pos, pmf,
             probe_step_size,
             absolpmf_thresh,
             sphere_vertices_lut,
@@ -350,7 +351,7 @@ __device__ int get_direction_ptt_d(
 
         __tmp = curand_uniform(st) * last_cdf;
 		int jj;
-		for (jj = 0; jj < DISC_FACE_CNT; jj++) {
+		for (jj = 0; jj < DISC_FACE_CNT - 1; jj++) {
 			if (__face_cdf_sh[jj] >= __tmp)
 				break;
 		}
@@ -369,7 +370,7 @@ __device__ int get_direction_ptt_d(
         get_probing_frame_d<IS_INIT>(__frame_sh, st, probing_frame);
 
         const float this_support = calculate_data_support_d(first_val,
-                                                             pos, pmf, dimx, dimt,
+                                                             pos, pmf,
                                                              probe_step_size,
                                                              absolpmf_thresh,
                                                              sphere_vertices_lut,
@@ -418,7 +419,6 @@ __device__ bool init_frame_ptt_d(
     const float max_angle,
     const float step_size,
     float3 first_step,
-    const int dimx, const int dimy, const int dimz, const int dimt,
     float3 seed,
     const cudaTextureObject_t *__restrict__ sphere_vertices_lut,
     float* __frame) {
@@ -438,7 +438,6 @@ __device__ bool init_frame_ptt_d(
         step_size,
         MAKE_REAL3(-first_step.x, -first_step.y, -first_step.z),
         __frame,
-        dimx, dimy, dimz, dimt,
         seed,
         sphere_vertices_lut,
         &tmp);
@@ -453,7 +452,6 @@ __device__ bool init_frame_ptt_d(
             step_size,
             MAKE_REAL3(first_step.x, first_step.y, first_step.z),
             __frame,
-            dimx, dimy, dimz, dimt,
             seed,
             sphere_vertices_lut,
             &tmp);

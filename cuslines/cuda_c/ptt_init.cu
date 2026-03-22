@@ -9,10 +9,6 @@ __global__ void getNumStreamlinesPtt_k(
 				        const long long rndSeed,
                                         const int nseed,
                                         const REAL3_T *__restrict__ seeds,
-                                        const int dimx,
-                                        const int dimy,
-                                        const int dimz,
-                                        const int dimt,
                                         const cudaTextureObject_t *__restrict__ pmf,
                                         const REAL3_T *__restrict__ sphere_vertices,
                                         const int2 *__restrict__ sphere_edges,
@@ -29,32 +25,34 @@ __global__ void getNumStreamlinesPtt_k(
         const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
         const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
 
-        const int n32dimt = ((dimt+31)/32)*32;
-
         if (slid >= nseed) {
                 return;
         }
 
-        REAL3_T *__restrict__ __shDir = shDir0+slid*dimt;
+        REAL3_T *__restrict__ __shDir = shDir0+slid*DIMT;
         curandStatePhilox4_32_10_t st;
         curand_init(rndSeed, gid, 0, &st);
 
         extern __shared__ REAL_T __sh[];
-        REAL_T *__pmf_data_sh = __sh + tidy*n32dimt;
+        REAL_T *__pmf_data_sh = __sh + tidy*N32DIMT;
 
         REAL3_T point = seeds[slid];
 
         #pragma unroll
-        for (int i = tidx; i < dimt; i += BDIM_X) {
-                REAL_T x_query = (REAL_T)(i * dimx) + point.x;
-                __pmf_data_sh[i] = tex3D<REAL_T>(*pmf, x_query, point.y, point.z);
+        for (int i = tidx; i < DIMT; i += BDIM_X) {
+                const int grid_col = i & WIDTH_MASK;
+                const int grid_row = i >> LOG2_WIDTH;
+
+                const REAL_T x_query = (REAL_T)(grid_col * DIMX) + point.x;
+                const REAL_T y_query = (REAL_T)(grid_row * DIMY) + point.y;
+                __pmf_data_sh[i] = tex3D<REAL_T>(*pmf, x_query, y_query, point.z);
                 if (__pmf_data_sh[i] < PMF_THRESHOLD_P) {
                         __pmf_data_sh[i] = 0.0;
                 }
         }
         __syncwarp(WMASK);
 
-        int *__shInd = reinterpret_cast<int *>(__sh + BDIM_Y*n32dimt) + tidy*n32dimt;
+        int *__shInd = reinterpret_cast<int *>(__sh + BDIM_Y*N32DIMT) + tidy*N32DIMT;
         int ndir = peak_directions_d<
             BDIM_X,
             BDIM_Y>(__pmf_data_sh,
@@ -62,7 +60,7 @@ __global__ void getNumStreamlinesPtt_k(
                     sphere_vertices,
                     sphere_edges,
                     num_edges,
-                    dimt,
+                    DIMT,
                     __shInd,
                     relative_peak_thres,
                     min_separation_angle);
