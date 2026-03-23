@@ -365,9 +365,25 @@ __device__ int get_direction_ptt_d(
         __syncwarp(WMASK);
 
         int winning_lane = -1; // -1 indicates nobody won
-        int __msk = __ballot_sync(WMASK, this_support >= PROBE_QUALITY * PMF_THRESHOLD_P);
-        if (__msk != 0) {
-            winning_lane = __ffs(__msk) - 1;
+        if (IS_INIT) {
+            float max_support = __shfl_sync(WMASK, this_support, 0); 
+            float tmp_support = this_support;
+            #pragma unroll
+            for (int jj = BDIM_X/2; jj > 0; jj /= 2) {
+                const float other = __shfl_down_sync(WMASK, tmp_support, jj);
+                tmp_support = fmaxf(tmp_support, other);
+            }
+            max_support = __shfl_sync(WMASK, tmp_support, 0);
+
+            int __msk = __ballot_sync(WMASK, (this_support == max_support) && (max_support >= PROBE_QUALITY * PMF_THRESHOLD_P));
+            if (__msk != 0) {
+                winning_lane = __ffs(__msk) - 1;
+            }
+        } else {
+            int __msk = __ballot_sync(WMASK, this_support >= PROBE_QUALITY * PMF_THRESHOLD_P);
+            if (__msk != 0) {
+                winning_lane = __ffs(__msk) - 1;
+            }
         }
         if (winning_lane != -1) {
             if (tidx == winning_lane) {
@@ -412,11 +428,11 @@ __device__ bool init_frame_ptt_d(
     bool init_norm_success;
     float3 tmp;
 
-    // Here we probabilistic find a good intial normal for this initial direction 
+    // Here we find a good initial normal for this initial direction
     init_norm_success = (bool) get_direction_ptt_d<BDIM_X, BDIM_Y, 1>(
         st,
         pmf,
-        MAKE_REAL3(-first_step.x, -first_step.y, -first_step.z),
+        MAKE_REAL3(first_step.x, first_step.y, first_step.z),
         __frame,
         seed,
         sphere_vertices_lut,
@@ -428,7 +444,7 @@ __device__ bool init_frame_ptt_d(
         init_norm_success = (bool) get_direction_ptt_d<BDIM_X, BDIM_Y, 1>(
             st,
             pmf,
-            MAKE_REAL3(first_step.x, first_step.y, first_step.z),
+            MAKE_REAL3(-first_step.x, -first_step.y, -first_step.z),
             __frame,
             seed,
             sphere_vertices_lut,
@@ -437,14 +453,14 @@ __device__ bool init_frame_ptt_d(
 
         if (!init_norm_success) { // This is rare
             return false;
-        } else {
-            if (tidx == 0) {
-                for (int ii = 0; ii < 9; ii++) {
-                    __frame[ii] = -__frame[ii];
-                }
-            }
-            __syncwarp(WMASK);
         }
+    } else {
+        if (tidx == 0) {
+            for (int ii = 0; ii < 9; ii++) {
+                __frame[ii] = -__frame[ii];
+            }
+        }
+        __syncwarp(WMASK);
     }
     if (tidx == 0) {
         for (int ii = 0; ii < 9; ii++) {

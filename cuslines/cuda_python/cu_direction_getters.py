@@ -425,7 +425,7 @@ class PttDirectionGetter(ProbDirectionGetter):
         odf_lut_res: int = 128,
         probe_length: float = 0.25,
         target_short_step: float = 0.025,
-        probe_quality: int = 4,
+        probe_quality: int = 8,
     ):
         """
         Use Parallel Transport Tractography
@@ -445,7 +445,7 @@ class PttDirectionGetter(ProbDirectionGetter):
             Default: 0.025
         probe_quality : float
             Number of probing steps.
-            Default: 4
+            Default: 8
         """
         checkCudaErrors(driver.cuInit(0))
         self.getnum_kernel_name = f"getNumStreamlinesPtt_k<{THR_X_SL},{BLOCK_Y},{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
