@@ -238,26 +238,42 @@ class GPUTracker:
         logger.info("Destroying GPUTracker and freeing GPU memory...")
 
         for n in range(self.ngpus):
-            checkCudaErrors(runtime.cudaSetDevice(n))
+            checkCudaErrors(runtime.cudaSetDevice(n), hard_error=False)
             if isinstance(self.dg, PttDirectionGetter):
                 if self.dataf_d[n]:
-                    checkCudaErrors(runtime.cudaDestroyTextureObject(self.dataf_d[n]))
+                    checkCudaErrors(
+                        runtime.cudaDestroyTextureObject(self.dataf_d[n]),
+                        hard_error=False,
+                    )
                 if self.dataf_array[n]:
-                    checkCudaErrors(runtime.cudaFreeArray(self.dataf_array[n]))
+                    checkCudaErrors(
+                        runtime.cudaFreeArray(self.dataf_array[n]), hard_error=False
+                    )
             else:
                 if self.dataf_d[n]:
-                    checkCudaErrors(runtime.cudaFree(self.dataf_d[n]))
+                    checkCudaErrors(runtime.cudaFree(self.dataf_d[n]), hard_error=False)
             if self.metric_map_d[n]:
-                checkCudaErrors(runtime.cudaDestroyTextureObject(self.metric_map_d[n]))
+                checkCudaErrors(
+                    runtime.cudaDestroyTextureObject(self.metric_map_d[n]),
+                    hard_error=False,
+                )
             if self.metric_map_array[n]:
-                checkCudaErrors(runtime.cudaFreeArray(self.metric_map_array[n]))
+                checkCudaErrors(
+                    runtime.cudaFreeArray(self.metric_map_array[n]), hard_error=False
+                )
             if self.sphere_vertices_d[n]:
-                checkCudaErrors(runtime.cudaFree(self.sphere_vertices_d[n]))
+                checkCudaErrors(
+                    runtime.cudaFree(self.sphere_vertices_d[n]), hard_error=False
+                )
             if self.sphere_edges_d[n]:
-                checkCudaErrors(runtime.cudaFree(self.sphere_edges_d[n]))
+                checkCudaErrors(
+                    runtime.cudaFree(self.sphere_edges_d[n]), hard_error=False
+                )
             self.dg.deallocate_on_gpu(n)
 
-            checkCudaErrors(runtime.cudaStreamDestroy(self.streams[n]))
+            checkCudaErrors(
+                runtime.cudaStreamDestroy(self.streams[n]), hard_error=False
+            )
         return False
 
     def _divide_chunks(self, seeds):

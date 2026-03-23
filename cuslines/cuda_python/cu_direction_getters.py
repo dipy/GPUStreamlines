@@ -421,7 +421,11 @@ class ProbDirectionGetter(GPUDirectionGetter):
 
 class PttDirectionGetter(ProbDirectionGetter):
     def __init__(
-        self, odf_lut_res: int = 128, probe_length: float = 0.25, target_short_step: float = 0.025, probe_quality: int = 4
+        self,
+        odf_lut_res: int = 128,
+        probe_length: float = 0.25,
+        target_short_step: float = 0.025,
+        probe_quality: int = 4,
     ):
         """
         Use Parallel Transport Tractography
@@ -460,11 +464,11 @@ class PttDirectionGetter(ProbDirectionGetter):
         self.macros["WIDTH_MASK"] = str(int(self.width_mask))
         self.macros["PROBE_QUALITY"] = str(float(self.probe_quality))
         self.macros["PROBE_STEP_SIZE"] = str(float(self.probe_length))
-        self.macros["STEP_FRAC"] = str(int(np.round(gpu_tracker.step_size / self.target_short_step)))
+        self.macros["STEP_FRAC"] = str(
+            int(np.round(gpu_tracker.step_size / self.target_short_step))
+        )
         self.macros["MAX_CURVATURE"] = str(
-            float(
-                8.0*np.sin(gpu_tracker.max_angle / 2.0)
-            )
+            float(8.0 * np.sin(gpu_tracker.max_angle / 2.0))
         )
 
     def allocate_on_gpu(self, n):
@@ -519,10 +523,14 @@ class PttDirectionGetter(ProbDirectionGetter):
     def deallocate_on_gpu(self, n):
         if self.sphere_vertices_lut_d[n]:
             checkCudaErrors(
-                runtime.cudaDestroyTextureObject(self.sphere_vertices_lut_d[n])
+                runtime.cudaDestroyTextureObject(self.sphere_vertices_lut_d[n]),
+                hard_error=False,
             )
         if self.sphere_vertices_lut_array_d[n]:
-            checkCudaErrors(runtime.cudaFreeArray(self.sphere_vertices_lut_array_d[n]))
+            checkCudaErrors(
+                runtime.cudaFreeArray(self.sphere_vertices_lut_array_d[n]),
+                hard_error=False,
+            )
 
     def prepare_data(self, dataf, stop_map, stop_threshold, sphere_vertices):
         dimx, dimy, dimz, dimt = dataf.shape

@@ -1,11 +1,14 @@
 from enum import IntEnum
 
 import numpy as np
+import logging
 from cuda.bindings import driver, nvrtc
 from cuda.bindings import runtime
 from cuda.bindings.runtime import cudaMemcpyKind
 
 from cuslines.cuda_python._globals import *
+
+logger = logging.getLogger("GPUStreamlines")
 
 
 class ModelType(IntEnum):
@@ -46,13 +49,20 @@ def _cudaGetErrorEnum(error):
         raise RuntimeError("Unknown error type: {}".format(error))
 
 
-def checkCudaErrors(result):
+def checkCudaErrors(result, hard_error=True):
     if result[0].value:
-        raise RuntimeError(
-            "CUDA error code={}({})".format(
-                result[0].value, _cudaGetErrorEnum(result[0])
+        if hard_error:
+            raise RuntimeError(
+                "CUDA error code={}({})".format(
+                    result[0].value, _cudaGetErrorEnum(result[0])
+                )
             )
-        )
+        else:
+            logger.warning(
+                "CUDA error code={}({})".format(
+                    result[0].value, _cudaGetErrorEnum(result[0])
+                )
+            )
     if len(result) == 1:
         return None
     elif len(result) == 2:
