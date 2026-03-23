@@ -2,7 +2,7 @@ import logging
 from math import radians
 
 import numpy as np
-from cuda.bindings import runtime
+from cuda.bindings import runtime, driver
 from cuda.bindings.runtime import cudaMemcpyKind
 from dipy.io.stateful_tractogram import Space, StatefulTractogram
 from nibabel.streamlines.array_sequence import ArraySequence
@@ -101,6 +101,12 @@ class GPUTracker:
             Number of seeds to process in each chunk per GPU
             default: 25000
         """
+        checkCudaErrors(driver.cuInit(0))
+        for ii in range(ngpus):
+            device = checkCudaErrors(driver.cuDeviceGet(ii))
+            ctx_params = driver.CUctxCreateParams()
+            checkCudaErrors(driver.cuCtxCreate(ctx_params, 0, device))
+
         self.dimx, self.dimy, self.dimz, self.dimt = dataf.shape
         if hasattr(dg, "prepare_data"):
             self.dataf = dg.prepare_data(

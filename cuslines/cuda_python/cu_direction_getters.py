@@ -5,7 +5,7 @@ from importlib.resources import files
 from time import time
 
 import numpy as np
-from cuda.bindings import driver, runtime
+from cuda.bindings import runtime
 from cuda.bindings.runtime import cudaMemcpyKind
 from cuda.cccl import get_include_paths
 from cuda.core import Device, LaunchConfig, Program, ProgramOptions, launch
@@ -161,8 +161,6 @@ class BootDirectionGetter(GPUDirectionGetter):
             raise ValueError(
                 f"Invalid model_type {model_type}, must be one of 'OPDT', 'CSA'"
             )
-
-        checkCudaErrors(driver.cuInit(0))
 
         self.H = np.ascontiguousarray(H, dtype=REAL_DTYPE)
         self.R = np.ascontiguousarray(R, dtype=REAL_DTYPE)
@@ -365,7 +363,6 @@ class BootDirectionGetter(GPUDirectionGetter):
 
 class ProbDirectionGetter(GPUDirectionGetter):
     def __init__(self):
-        checkCudaErrors(driver.cuInit(0))
         self.getnum_kernel_name = f"getNumStreamlinesProb_k<{THR_X_SL},{BLOCK_Y},{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
         self.genstreamlines_kernel_name = f"genStreamlinesMergeProb_k<{THR_X_SL},{BLOCK_Y},PROB,const {REAL_DTYPE_AS_STR} *__restrict__,{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
 
@@ -447,7 +444,6 @@ class PttDirectionGetter(ProbDirectionGetter):
             Number of probing steps.
             Default: 8
         """
-        checkCudaErrors(driver.cuInit(0))
         self.getnum_kernel_name = f"getNumStreamlinesPtt_k<{THR_X_SL},{BLOCK_Y},{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
         self.genstreamlines_kernel_name = f"genStreamlinesMergeProb_k<{THR_X_SL},{BLOCK_Y},PTT,const cudaTextureObject_t *__restrict__,{REAL_DTYPE_AS_STR},{REAL3_DTYPE_AS_STR}>"
         self.odf_lut_res = odf_lut_res
