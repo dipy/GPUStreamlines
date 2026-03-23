@@ -562,6 +562,18 @@ class PttDirectionGetter(ProbDirectionGetter):
         else:
             data_f_rearranged = dataf
 
+        total_memory_usage_gb = (
+            (tiles_per_row * dimx) * (tiles_per_col * dimy) * dimz * 4 / 1e9
+        )
+        logger.info(
+            (
+                f"For PTT, we will allocate a 3D texture of size "
+                f"{tiles_per_row * dimx}x{tiles_per_col * dimy}x{dimz} "
+                "to store the ODFs on the GPU. This will be in 4 byte floats and use "
+                f"{total_memory_usage_gb:.2f} GB of GPU memory. "
+                "If this is too near your total GPU memory, it will error"
+            )
+        )
         data_f_rearranged = data_f_rearranged.reshape(
             dimx, dimy, dimz, tiles_per_col, tiles_per_row
         )
