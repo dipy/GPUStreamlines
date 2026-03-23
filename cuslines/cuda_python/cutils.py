@@ -39,14 +39,18 @@ BLOCK_Y = THR_X_BL // THR_X_SL
 DEV_PTR = object
 
 
-def _cudaGetErrorEnum(error):
+def _cudaGetErrorEnum(error, hard_error):
     if isinstance(error, driver.CUresult):
         err, name = driver.cuGetErrorName(error)
         return name if err == driver.CUresult.CUDA_SUCCESS else "<unknown>"
     elif isinstance(error, nvrtc.nvrtcResult):
         return nvrtc.nvrtcGetErrorString(error)[1]
     else:
-        raise RuntimeError("Unknown error type: {}".format(error))
+        if hard_error:
+            raise RuntimeError("Unknown error type: {}".format(error))
+        else:
+            logger.warning("Unknown error type: {}".format(error))
+            return "<unknown>"
 
 
 def checkCudaErrors(result, hard_error=True):
@@ -54,13 +58,13 @@ def checkCudaErrors(result, hard_error=True):
         if hard_error:
             raise RuntimeError(
                 "CUDA error code={}({})".format(
-                    result[0].value, _cudaGetErrorEnum(result[0])
+                    result[0].value, _cudaGetErrorEnum(result[0], hard_error)
                 )
             )
         else:
             logger.warning(
                 "CUDA error code={}({})".format(
-                    result[0].value, _cudaGetErrorEnum(result[0])
+                    result[0].value, _cudaGetErrorEnum(result[0], hard_error)
                 )
             )
     if len(result) == 1:
