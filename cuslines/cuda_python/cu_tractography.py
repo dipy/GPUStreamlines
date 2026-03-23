@@ -104,8 +104,11 @@ class GPUTracker:
         checkCudaErrors(driver.cuInit(0))
         for ii in range(ngpus):
             device = checkCudaErrors(driver.cuDeviceGet(ii))
-            ctx_params = driver.CUctxCreateParams()
-            checkCudaErrors(driver.cuCtxCreate(ctx_params, 0, device))
+            try:
+                ctx_params = driver.CUctxCreateParams()
+                checkCudaErrors(driver.cuCtxCreate(ctx_params, 0, device))
+            except TypeError:
+                checkCudaErrors(driver.cuCtxCreate(0, device))
 
         self.dimx, self.dimy, self.dimz, self.dimt = dataf.shape
         if hasattr(dg, "prepare_data"):
