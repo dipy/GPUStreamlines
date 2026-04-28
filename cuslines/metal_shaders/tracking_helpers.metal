@@ -200,7 +200,7 @@ inline int peak_directions(const threadgroup float* odf,
 
                 int j = 0;
                 for (; j < k; j++) {
-                    const float cs = FABS(abc.x * dirs[j].x +
+                    const float cs = APPLY_ABS_IF_SYM(abc.x * dirs[j].x +
                                           abc.y * dirs[j].y +
                                           abc.z * dirs[j].z);
                     if (cs > cos_similarity) {

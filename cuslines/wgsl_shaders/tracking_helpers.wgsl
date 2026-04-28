@@ -237,7 +237,8 @@ fn peak_directions_fn(
                     let dx = wg_dirs_sh[d_base];
                     let dy = wg_dirs_sh[d_base + 1u];
                     let dz = wg_dirs_sh[d_base + 2u];
-                    let cs = abs(abc.x * dx + abc.y * dy + abc.z * dz);
+                    let dot_val = abc.x * dx + abc.y * dy + abc.z * dz;
+                    let cs = select(abs(dot_val), dot_val, FULL_BASIS == 1u);
                     if (cs > cos_similarity) {
                         break;
                     }

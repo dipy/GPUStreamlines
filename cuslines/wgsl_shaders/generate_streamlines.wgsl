@@ -136,7 +136,7 @@ fn get_direction_prob(
         for (var i = i32(tidx); i < dimt; i += i32(THR_X_SL)) {
             let sv = load_sphere_verts_f3(u32(i));
             let dot_val = dir.x * sv.x + dir.y * sv.y + dir.z * sv.z;
-            if (abs(dot_val) < cos_similarity) {
+            if (select(abs(dot_val), dot_val, FULL_BASIS == 1u) < cos_similarity) {
                 wg_sh_mem[sh_offset + u32(i)] = 0.0;
             }
         }

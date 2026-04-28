@@ -35,6 +35,12 @@ using namespace metal;
 
 #define MAX_SLINES_PER_SEED (10)
 
+#if FULL_BASIS == 1
+  #define APPLY_ABS_IF_SYM(x) (x)
+#else
+  #define APPLY_ABS_IF_SYM(x) FABS(x)
+#endif
+
 #define MIN(x,y) (((x)<(y))?(x):(y))
 #define MAX(x,y) (((x)>(y))?(x):(y))
 #define POW2(n)  (1 << (n))
