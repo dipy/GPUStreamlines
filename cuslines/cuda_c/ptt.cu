@@ -366,14 +366,14 @@ __device__ int get_direction_ptt_d(
 
         int winning_lane = -1; // -1 indicates nobody won
         if (IS_INIT) {
-            float max_support = __shfl_sync(WMASK, this_support, 0); 
+            float max_support = __shfl_sync(WMASK, this_support, 0, BDIM_X); 
             float tmp_support = this_support;
             #pragma unroll
             for (int jj = BDIM_X/2; jj > 0; jj /= 2) {
-                const float other = __shfl_down_sync(WMASK, tmp_support, jj);
+                const float other = __shfl_down_sync(WMASK, tmp_support, jj, BDIM_X);
                 tmp_support = fmaxf(tmp_support, other);
             }
-            max_support = __shfl_sync(WMASK, tmp_support, 0);
+            max_support = __shfl_sync(WMASK, tmp_support, 0, BDIM_X);
 
             int __msk = __ballot_sync(WMASK, (this_support == max_support) && (max_support >= PROBE_QUALITY * PMF_THRESHOLD_P));
             if (__msk != 0) {
