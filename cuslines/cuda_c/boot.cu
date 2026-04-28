@@ -116,8 +116,7 @@ template<int BDIM_X,
          int BDIM_Y,
          typename REAL_T,
          typename REAL3_T>
-__device__ int closest_peak_d(const REAL_T max_angle,
-			      const REAL3_T  direction, //dir
+__device__ int closest_peak_d(const REAL3_T  direction, //dir
                               const int npeaks,
                               const REAL3_T *__restrict__ peaks,
                                     REAL3_T *__restrict__ peak) {// dirs,
@@ -127,8 +126,7 @@ __device__ int closest_peak_d(const REAL_T max_angle,
         const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
         const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
 
-        //const REAL_T cos_similarity = COS(MAX_ANGLE_P);
-        const REAL_T cos_similarity = COS(max_angle);
+        const REAL_T cos_similarity = COS(MAX_ANGLE);
 #if 0
         if (!threadIdx.y && !tidx) {
                 printf("direction: (%f, %f, %f)\n",
@@ -400,34 +398,19 @@ template<int BDIM_X,
          typename REAL3_T>
 __device__ int get_direction_boot_d(
                                 curandStatePhilox4_32_10_t *st,
-                                const REAL_T max_angle,
-                                const REAL_T min_signal,
-                                const REAL_T relative_peak_thres,
-                                const REAL_T min_separation_angle,
+		                const REAL_T min_signal,
                                 REAL3_T dir,
-                                const int dimx,
-                                const int dimy,
-                                const int dimz,
-                                const int dimt,
                                 const REAL_T *__restrict__ dataf,
-                                const int *__restrict__ b0s_mask, // not using this (and its opposite, dwi_mask)
-                                                                  // but not clear if it will never be needed so
-                                                                  // we'll keep it here for now...
+                                const int *__restrict__ b0s_mask,
                                 const REAL3_T point,
                                 const REAL_T *__restrict__ H, 
                                 const REAL_T *__restrict__ R,
-                                // model unused
-                                // max_angle, pmf_threshold from global defines
-                                // b0s_mask already passed
-                                // min_signal from global defines
                                 const int delta_nr,
                                 const REAL_T *__restrict__ delta_b,
                                 const REAL_T *__restrict__ delta_q, // fit_matrix
-                                const int samplm_nr,
                                 const REAL_T *__restrict__ sampling_matrix,
                                 const REAL3_T *__restrict__ sphere_vertices,
                                 const int2 *__restrict__ sphere_edges,
-                                const int num_edges,
                                 REAL3_T *__restrict__ dirs) {
 
         const int tidx = threadIdx.x;
@@ -436,25 +419,23 @@ __device__ int get_direction_boot_d(
         const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
         const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
 
-	const int n32dimt = ((dimt+31)/32)*32;
-
 	extern REAL_T __shared__ __sh[];
 
 	REAL_T *__vox_data_sh = reinterpret_cast<REAL_T *>(__sh);
-	REAL_T *__msk_data_sh = __vox_data_sh + BDIM_Y*n32dimt;
+	REAL_T *__msk_data_sh = __vox_data_sh + BDIM_Y*N32DIMT;
 
-	REAL_T *__r_sh = __msk_data_sh + BDIM_Y*n32dimt;
-	REAL_T *__h_sh = __r_sh + BDIM_Y*MAX(n32dimt, samplm_nr);
+	REAL_T *__r_sh = __msk_data_sh + BDIM_Y*N32DIMT;
+	REAL_T *__h_sh = __r_sh + BDIM_Y*MAX(N32DIMT, SAMPLM_NR);
 
-	__vox_data_sh += tidy*n32dimt;
-	__msk_data_sh += tidy*n32dimt;
+	__vox_data_sh += tidy*N32DIMT;
+	__msk_data_sh += tidy*N32DIMT;
 
-	__r_sh += tidy*MAX(n32dimt, samplm_nr);
-	__h_sh += tidy*MAX(n32dimt, samplm_nr);
-	
+	__r_sh += tidy*MAX(N32DIMT, SAMPLM_NR);
+	__h_sh += tidy*MAX(N32DIMT, SAMPLM_NR);
+
 	// compute hr_side (may be passed from python)
 	int hr_side = 0;
-	for(int j = tidx; j < dimt; j += BDIM_X) {
+	for(int j = tidx; j < DIMT; j += BDIM_X) {
 		hr_side += !b0s_mask[j] ? 1 : 0;
 	}
         #pragma unroll
@@ -465,15 +446,15 @@ __device__ int get_direction_boot_d(
         #pragma unroll
         for(int i = 0; i < NATTEMPTS; i++) {
 
-                const int rv = trilinear_interp_d<BDIM_X>(dimx, dimy, dimz, dimt, -1, dataf, point, __vox_data_sh);
+                const int rv = trilinear_interp_d<BDIM_X>(dataf, point, __vox_data_sh);
 
-		const int nmsk = maskGet<BDIM_X>(dimt, b0s_mask, __vox_data_sh, __msk_data_sh);
+		const int nmsk = maskGet<BDIM_X>(DIMT, b0s_mask, __vox_data_sh, __msk_data_sh);
 
 		//if (!tidx && !threadIdx.y && !blockIdx.x) {
 		//
 		//	printf("interp of %f, %f, %f\n", point.x, point.y, point.z);
 		//	printf("hr_side: %d\n", hr_side);
-		//	printArray("vox_data", 6, dimt, __vox_data_sh[tidy]);
+		//	printArray("vox_data", 6, DIMT, __vox_data_sh[tidy]);
 		//	printArray("msk_data", 6, nmsk, __msk_data_sh[tidy]);
 		//}
 		//break;
@@ -513,21 +494,21 @@ __device__ int get_direction_boot_d(
 			//__syncwarp();
 		
 			// vox_data[dwi_mask] = masked_data
-			maskPut<BDIM_X>(dimt, b0s_mask, __h_sh, __vox_data_sh);
+			maskPut<BDIM_X>(DIMT, b0s_mask, __h_sh, __vox_data_sh);
 			__syncwarp(WMASK);
 
-			//printArray("vox_data[dwi_mask]:", 6, dimt, __vox_data_sh[tidy]);
+			//printArray("vox_data[dwi_mask]:", 6, DIMT, __vox_data_sh[tidy]);
 			//__syncwarp();
 
-			for(int j = tidx; j < dimt; j += BDIM_X) {
+			for(int j = tidx; j < DIMT; j += BDIM_X) {
 				//__vox_data_sh[j] = MAX(MIN_SIGNAL_P, __vox_data_sh[j]);
 				__vox_data_sh[j] = MAX(min_signal, __vox_data_sh[j]);
 			}
 			__syncwarp(WMASK);
 
-			const REAL_T denom = avgMask<BDIM_X>(dimt, b0s_mask, __vox_data_sh);
+			const REAL_T denom = avgMask<BDIM_X>(DIMT, b0s_mask, __vox_data_sh);
 
-			for(int j = tidx; j < dimt; j += BDIM_X) {
+			for(int j = tidx; j < DIMT; j += BDIM_X) {
 				__vox_data_sh[j] /= denom;
 			}
 			__syncwarp();
@@ -539,23 +520,23 @@ __device__ int get_direction_boot_d(
 			//if (!tidx && !threadIdx.y && !blockIdx.x) {
 			//
 			//	printf("__vox_data_sh:\n");
-			//	printArray("vox_data", 6, dimt, __vox_data_sh[tidy]);
+			//	printArray("vox_data", 6, DIMT, __vox_data_sh[tidy]);
 			//}
 			//break;
 
-			maskGet<BDIM_X>(dimt, b0s_mask, __vox_data_sh, __msk_data_sh);
+			maskGet<BDIM_X>(DIMT, b0s_mask, __vox_data_sh, __msk_data_sh);
 			__syncwarp(WMASK);
 
                         fit_model_coef<BDIM_X, MODEL_T>(delta_nr, hr_side, delta_q, delta_b, __msk_data_sh, __h_sh, __r_sh);
 
                         // __r_sh[tidy] <- python 'coef'
 
-                        ndotp_d<BDIM_X>(samplm_nr, delta_nr, __r_sh, sampling_matrix, __h_sh);
+                        ndotp_d<BDIM_X>(SAMPLM_NR, delta_nr, __r_sh, sampling_matrix, __h_sh);
 
                         // __h_sh[tidy] <- python 'pmf'
                 } else {
                         #pragma unroll
-                        for(int j = tidx; j < samplm_nr; j += BDIM_X) {
+                        for(int j = tidx; j < SAMPLM_NR; j += BDIM_X) {
 				__h_sh[j] = 0;
                         }
                         // __h_sh[tidy] <- python 'pmf'
@@ -563,17 +544,17 @@ __device__ int get_direction_boot_d(
                 __syncwarp(WMASK);
 #if 0
                 if (!threadIdx.y && threadIdx.x == 0) {
-                        for(int j = 0; j < samplm_nr; j++) {
+                        for(int j = 0; j < SAMPLM_NR; j++) {
                                 printf("pmf[%d]: %f\n", j, __h_sh[tidy][j]);
                         }
                 }
                 //return;
 #endif
-                const REAL_T abs_pmf_thr = PMF_THRESHOLD_P*max_d<BDIM_X>(samplm_nr, __h_sh, REAL_MIN);
+                const REAL_T abs_pmf_thr = PMF_THRESHOLD_P*max_d<BDIM_X>(SAMPLM_NR, __h_sh, REAL_MIN);
                 __syncwarp(WMASK);
 
                 #pragma unroll
-                for(int j = tidx; j < samplm_nr; j += BDIM_X) {
+                for(int j = tidx; j < SAMPLM_NR; j += BDIM_X) {
 			const REAL_T __v = __h_sh[j];
 			if (__v < abs_pmf_thr) {
 				__h_sh[j] = 0;
@@ -583,7 +564,7 @@ __device__ int get_direction_boot_d(
 #if 0
                 if (!threadIdx.y && threadIdx.x == 0) {
                         printf("abs_pmf_thr: %f\n", abs_pmf_thr);
-                        for(int j = 0; j < samplm_nr; j++) {
+                        for(int j = 0; j < SAMPLM_NR; j++) {
                                 printf("pmfNORM[%d]: %f\n", j, __h_sh[tidy][j]);
                         }
                 }
@@ -602,11 +583,7 @@ __device__ int get_direction_boot_d(
                                                    BDIM_Y>(__h_sh, dirs,
                                                            sphere_vertices,
                                                            sphere_edges,
-                                                           num_edges,
-							   samplm_nr,
-							   reinterpret_cast<int *>(__r_sh), // reuse __r_sh as shInd in func which is large enough
-							   relative_peak_thres,
-							   min_separation_angle);
+							   reinterpret_cast<int *>(__r_sh)); // reuse __r_sh as shInd in func which is large enough
                 if (NATTEMPTS == 1) { // init=True...
                         return ndir; // and dirs;
                 } else { // init=False...
@@ -617,7 +594,7 @@ __device__ int get_direction_boot_d(
                                 }
                                 */
                                 REAL3_T peak;
-                                const int foundPeak = closest_peak_d<BDIM_X, BDIM_Y, REAL_T, REAL3_T>(max_angle, dir, ndir, dirs, &peak);
+                                const int foundPeak = closest_peak_d<BDIM_X, BDIM_Y, REAL_T, REAL3_T>(dir, ndir, dirs, &peak);
                                 __syncwarp(WMASK);
                                 if (foundPeak) {
                                         if (tidx == 0) {
@@ -637,17 +614,9 @@ template<int BDIM_X,
          typename REAL3_T>
 __global__ void getNumStreamlinesBoot_k(
                                     const ModelType model_type,
-                                    const REAL_T max_angle,
 		                    const REAL_T min_signal,
-		                    const REAL_T relative_peak_thres,
-	                            const REAL_T min_separation_angle,
-		                    const long long rndSeed,
                                     const int nseed,
                                     const REAL3_T *__restrict__ seeds,
-                                    const int dimx,
-                                    const int dimy,
-                                    const int dimz,
-                                    const int dimt,
                                     const REAL_T *__restrict__ dataf,
                                     const REAL_T *__restrict__ H,
                                     const REAL_T *__restrict__ R,
@@ -655,11 +624,9 @@ __global__ void getNumStreamlinesBoot_k(
                                     const REAL_T *__restrict__ delta_b,
                                     const REAL_T *__restrict__ delta_q,
                                     const int  *__restrict__ b0s_mask, // change to int
-		                    const int samplm_nr,
                                     const REAL_T *__restrict__ sampling_matrix,
                                     const REAL3_T *__restrict__ sphere_vertices,
                                     const int2 *__restrict__ sphere_edges,
-                                    const int num_edges,
                                     REAL3_T *__restrict__ shDir0,
                                     int *slineOutOff) {
 
@@ -674,13 +641,13 @@ __global__ void getNumStreamlinesBoot_k(
         REAL3_T seed = seeds[slid]; 
         // seed = lin_mat*seed + offset
 
-        REAL3_T *__restrict__ __shDir = shDir0+slid*samplm_nr;
+        REAL3_T *__restrict__ __shDir = shDir0+slid*SAMPLM_NR;
 
-	// const int hr_side = dimt-1;
+	// const int hr_side = DIMT-1;
 
         curandStatePhilox4_32_10_t st;
-        //curand_init(rndSeed, slid + rndOffset, DIV_UP(hr_side, BDIM_X)*tidx, &st); // each thread uses DIV_UP(hr_side/BDIM_X)
-        curand_init(rndSeed, gid, 0, &st); // each thread uses DIV_UP(hr_side/BDIM_X)
+        //curand_init(RNG_SEED, slid + rndOffset, DIV_UP(hr_side, BDIM_X)*tidx, &st); // each thread uses DIV_UP(hr_side/BDIM_X)
+        curand_init(RNG_SEED, gid, 0, &st); // each thread uses DIV_UP(hr_side/BDIM_X)
                                                                                    // elements of the same sequence
         // python:
         //directions = get_direction(None, dataf, dwi_mask, sphere, s, H, R, model, max_angle,
@@ -699,12 +666,9 @@ __global__ void getNumStreamlinesBoot_k(
                                             1,
                                             OPDT>(
                                                 &st,
-                                                max_angle,
                                                 min_signal,
-                                                relative_peak_thres,
-                                                min_separation_angle,
                                                 MAKE_REAL3(0,0,0),
-                                                dimx, dimy, dimz, dimt, dataf,
+                                                dataf,
                                                 b0s_mask /* !dwi_mask */,
                                                 seed,
                                                 H, R,
@@ -714,11 +678,9 @@ __global__ void getNumStreamlinesBoot_k(
                                                 // min_signal from global defines
                                                 delta_nr,
                                                 delta_b, delta_q, // fit_matrix
-                                                samplm_nr,
                                                 sampling_matrix,
                                                 sphere_vertices,
                                                 sphere_edges,
-                                                num_edges,
                                                 __shDir);
                 break;
             case CSA:
@@ -727,12 +689,9 @@ __global__ void getNumStreamlinesBoot_k(
                                             1,
                                             CSA>(
                                                 &st,
-                                                max_angle,
                                                 min_signal,
-                                                relative_peak_thres,
-                                                min_separation_angle,
                                                 MAKE_REAL3(0,0,0),
-                                                dimx, dimy, dimz, dimt, dataf,
+                                                dataf,
                                                 b0s_mask /* !dwi_mask */,
                                                 seed,
                                                 H, R,
@@ -742,11 +701,9 @@ __global__ void getNumStreamlinesBoot_k(
                                                 // min_signal from global defines
                                                 delta_nr,
                                                 delta_b, delta_q, // fit_matrix
-                                                samplm_nr,
                                                 sampling_matrix,
                                                 sphere_vertices,
                                                 sphere_edges,
-                                                num_edges,
                                                 __shDir);
                 break;
             default:
@@ -768,24 +725,13 @@ template<int BDIM_X,
          typename REAL3_T>
 __device__ int tracker_boot_d(
                         curandStatePhilox4_32_10_t *st,
-			            const REAL_T max_angle,
-			            const REAL_T tc_threshold,
-			            const REAL_T step_size,
-			            const REAL_T relative_peak_thres,
-			            const REAL_T min_separation_angle,
-                         REAL3_T seed,
-                         REAL3_T first_step,
-                         REAL3_T voxel_size,
-                         const int dimx,
-                         const int dimy,
-                         const int dimz,
-                         const int dimt,
-                         const REAL_T *__restrict__ dataf,
-                         const REAL_T *__restrict__ metric_map,
-		                 const int samplm_nr,
-                         const REAL3_T *__restrict__ sphere_vertices,
-                         const int2 *__restrict__ sphere_edges,
-                         const int num_edges,
+                        REAL3_T seed,
+                        REAL3_T first_step,
+                        REAL3_T voxel_size,
+                        const REAL_T *__restrict__ dataf,
+                        const cudaTextureObject_t *__restrict__ metric_map,
+                        const REAL3_T *__restrict__ sphere_vertices,
+                        const int2 *__restrict__ sphere_edges,
                         /*BOOT specific params*/
                         const REAL_T min_signal,
                         const int delta_nr,
@@ -830,22 +776,17 @@ __device__ int tracker_boot_d(
                                                 5,
                                                 MODEL_T>(
                                                         st,
-                                                        max_angle,
                                                         min_signal,
-                                                        relative_peak_thres,
-                                                        min_separation_angle,
                                                         direction,
-                                                        dimx, dimy, dimz, dimt, dataf,
+                                                        dataf,
                                                         b0s_mask /* !dwi_mask */,
                                                         point,
                                                         H, R,
                                                         delta_nr,
                                                         delta_b, delta_q, // fit_matrix
-                                                        samplm_nr,
                                                         sampling_matrix,
                                                         sphere_vertices,
                                                         sphere_edges,
-                                                        num_edges,
                                                         __sh_new_dir + tidy);
                 __syncwarp(WMASK);
                 direction = __sh_new_dir[tidy];
@@ -855,16 +796,16 @@ __device__ int tracker_boot_d(
                         break;
                 }
 
-                point.x += (direction.x / voxel_size.x) * (step_size / step_frac);
-                point.y += (direction.y / voxel_size.y) * (step_size / step_frac);
-                point.z += (direction.z / voxel_size.z) * (step_size / step_frac);
+                point.x += (direction.x / voxel_size.x) * (STEP_SIZE / step_frac);
+                point.y += (direction.y / voxel_size.y) * (STEP_SIZE / step_frac);
+                point.z += (direction.z / voxel_size.z) * (STEP_SIZE / step_frac);
 
                 if ((tidx == 0) && ((i % step_frac) == 0)){
                         streamline[i/step_frac] = point;
                 }
                 __syncwarp(WMASK);
 
-                tissue_class = check_point_d<BDIM_X, BDIM_Y>(tc_threshold, point, dimx, dimy, dimz, metric_map);
+                tissue_class = check_point_d<REAL3_T>(point, metric_map);
 
                 if (tissue_class == ENDPOINT ||
                     tissue_class == INVALIDPOINT ||
@@ -889,25 +830,13 @@ template<int BDIM_X,
          typename REAL_T,
          typename REAL3_T>
 __global__ void genStreamlinesMergeBoot_k(
-				      const REAL_T max_angle,
-				      const REAL_T tc_threshold,
-				      const REAL_T step_size,
-				      const REAL_T relative_peak_thres,
-				      const REAL_T min_separation_angle,
-				      const long long rndSeed,
                       const int rndOffset,
                       const int nseed,
                       const REAL3_T *__restrict__ seeds,
-                      const int dimx,
-                      const int dimy,
-                      const int dimz,
-                      const int dimt,
                       const REAL_T *__restrict__ dataf,
-                      const REAL_T *__restrict__ metric_map,
-				      const int samplm_nr,
+                      const cudaTextureObject_t *__restrict__ metric_map,
                       const REAL3_T *__restrict__ sphere_vertices,
                       const int2 *__restrict__ sphere_edges,
-                      const int num_edges,
                       /*BOOT specific params*/
 				      const REAL_T min_signal,
 				      const int delta_nr,
@@ -935,8 +864,8 @@ __global__ void genStreamlinesMergeBoot_k(
         curandStatePhilox4_32_10_t st;
         // const int gbid = blockIdx.y*gridDim.x + blockIdx.x;
         const size_t gid = blockIdx.x * blockDim.y * blockDim.x + blockDim.x * threadIdx.y + threadIdx.x;
-        //curand_init(rndSeed, slid+rndOffset, DIV_UP(hr_side, BDIM_X)*tidx, &st); // each thread uses DIV_UP(HR_SIDE/BDIM_X)
-        curand_init(rndSeed, gid+1, 0, &st); // each thread uses DIV_UP(hr_side/BDIM_X)
+        //curand_init(RNG_SEED, slid+rndOffset, DIV_UP(hr_side, BDIM_X)*tidx, &st); // each thread uses DIV_UP(HR_SIDE/BDIM_X)
+        curand_init(RNG_SEED, gid+1, 0, &st); // each thread uses DIV_UP(hr_side/BDIM_X)
                                                                                  // elements of the same sequence
         if (slid >= nseed) {
                 return;
@@ -959,7 +888,7 @@ __global__ void genStreamlinesMergeBoot_k(
         int slineOff = slineOutOff[slid];
 
         for(int i = 0; i < ndir; i++) {
-                REAL3_T first_step = shDir0[slid*samplm_nr + i];
+                REAL3_T first_step = shDir0[slid*SAMPLM_NR + i];
 
 		REAL3_T *__restrict__ currSline = sline + slineOff*MAX_SLINE_LEN*2;
 
@@ -977,20 +906,13 @@ __global__ void genStreamlinesMergeBoot_k(
                                                          BDIM_Y,
                                                          MODEL_T>(
                                                         &st,
-		                		                        max_angle,
-			        			                        tc_threshold,
-                                                        step_size,
-                                                        relative_peak_thres,
-                                                        min_separation_angle,
                                                         seed,
                                                         MAKE_REAL3(-first_step.x, -first_step.y, -first_step.z),
                                                         MAKE_REAL3(1, 1, 1),
-                                                        dimx, dimy, dimz, dimt, dataf,
+                                                        dataf,
                                                         metric_map,
-                                                        samplm_nr,
                                                         sphere_vertices,
                                                         sphere_edges,
-                                                        num_edges,
                                                         min_signal,
                                                         delta_nr,
                                                         H,
@@ -1016,20 +938,13 @@ __global__ void genStreamlinesMergeBoot_k(
                                                          BDIM_Y,
                                                          MODEL_T>(
                                                         &st,
-     	                    			                max_angle,
-		        				                        tc_threshold,
-	                				                    step_size,
-			    				                        relative_peak_thres,
-			            			                    min_separation_angle,
                                                         seed,
                                                         first_step,
                                                         MAKE_REAL3(1, 1, 1),
-                                                        dimx, dimy, dimz, dimt, dataf,
+                                                        dataf,
                                                         metric_map,
-			        			                        samplm_nr,
                                                         sphere_vertices,
                                                         sphere_edges,
-                                                        num_edges,
                                                         min_signal,
                                                         delta_nr,
                                                         H,

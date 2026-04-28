@@ -29,8 +29,6 @@
 #ifndef __GLOBALS_H__
 #define __GLOBALS_H__
 
-#define REAL_SIZE 4
-
 #if REAL_SIZE == 4
 
 #define REAL		float
@@ -68,28 +66,12 @@
 #define ACOS		acos
 
 #endif
-// TODO: half this in when WMGMI seeding
-#define MAX_SLINE_LEN	(501)
-#define PMF_THRESHOLD_P	((REAL)0.05)
-
-#define THR_X_BL (64)
-#define THR_X_SL (32)
-
-#define MAX_SLINES_PER_SEED (10)
 
 #define MIN(x,y) (((x)<(y))?(x):(y))
 #define MAX(x,y) (((x)>(y))?(x):(y))
 #define POW2(n) (1 << (n))
 
 #define DIV_UP(a,b) (((a)+((b)-1))/(b))
-
-#define EXCESS_ALLOC_FACT 2
-
-#define NORM_EPS ((REAL)1e-8)
-
-#if 0
-  #define DEBUG
-#endif
 
 enum ModelType {
   OPDT = 0,
