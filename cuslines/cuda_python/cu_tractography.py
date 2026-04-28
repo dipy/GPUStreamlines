@@ -40,6 +40,7 @@ class GPUTracker:
         stop_threshold: float,
         sphere_vertices: np.ndarray,
         sphere_edges: np.ndarray,
+        full_basis: bool = False,
         max_angle: float = radians(60),
         step_size: float = 0.5,
         min_pts=0,
@@ -70,6 +71,9 @@ class GPUTracker:
             Vertices of the sphere used for direction sampling.
         sphere_edges : np.ndarray
             Edges of the sphere used for direction sampling.
+        full_basis : bool, optional
+            Whether to use full basis for spherical harmonics
+            default: False
         max_angle : float, optional
             Maximum angle (in radians) between steps
             default: radians(60)
@@ -143,6 +147,7 @@ class GPUTracker:
         self.rng_seed = int(rng_seed)
         self.rng_offset = int(rng_offset)
         self.chunk_size = int(chunk_size)
+        self.full_basis = bool(full_basis)
 
         avail = checkCudaErrors(runtime.cudaGetDeviceCount())
         if self.ngpus > avail:
