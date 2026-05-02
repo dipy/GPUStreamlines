@@ -30,6 +30,17 @@ def _detect_backend():
         pass
     return None
 
+try:
+    import numba
+
+    HAS_NUMBA = True
+except (ImportError, Exception):
+    pass
+
+if HAS_NUMBA:
+    from cuslines.numba.nu_tractography import (
+        CPUTracker
+    )
 
 BACKEND = _detect_backend()
 
@@ -67,15 +78,18 @@ elif BACKEND == "webgpu":
         WebGPUTracker as GPUTracker,
     )
 else:
-    raise ImportError(
-        "No GPU backend available. Install either:\n"
-        "  - CUDA: pip install 'cuslines[cu13]' (NVIDIA GPU)\n"
-        "  - Metal: pip install 'cuslines[metal]' (Apple Silicon)\n"
-        "  - WebGPU: pip install 'cuslines[webgpu]' (cross-platform)"
-    )
+    if not HAS_NUMBA:
+        raise ImportError(
+            "No backend available. Install either:\n"
+            "  - CUDA: pip install 'cuslines[cu13]' (NVIDIA GPU)\n"
+            "  - Metal: pip install 'cuslines[metal]' (Apple Silicon)\n"
+            "  - WebGPU: pip install 'cuslines[webgpu]' (cross-platform)"
+            "  - Numba: pip install 'cuslines[numba]' (CPU)"
+        )
 
 __all__ = [
     "GPUTracker",
+    "HAS_NUMBA",
     "ProbDirectionGetter",
     "PttDirectionGetter",
     "BootDirectionGetter",
