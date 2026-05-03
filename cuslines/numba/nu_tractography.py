@@ -43,14 +43,8 @@ class SeedBatchPropagator:
         self.slines     = None
         self.sline_lens = None
 
-    def _get_num_streamlines(self, seeds):
         t = self.cpu_tracker
-        nseed = len(seeds)
-
-        shDir0      = np.zeros((nseed * t.dimt, 3), dtype=REAL_DTYPE)
-        slineOutOff = np.zeros(nseed + 1, dtype=np.int32)
-
-        getNumStreamlinesProb = getNumStreamlinesProb_generator(
+        self.getNumStreamlinesProb = getNumStreamlinesProb_generator(
             t.dimx,
             t.dimy,
             t.dimz,
@@ -60,7 +54,26 @@ class SeedBatchPropagator:
             t.nedges,
             t.full_basis,
         )
-        getNumStreamlinesProb(
+
+        self.genStreamlinesMergeProb = genStreamlinesMergeProb_generator(
+            t.dimx,
+            t.dimy,
+            t.dimz,
+            t.dimt,
+            t.full_basis,
+            t.step_size,
+            t.max_angle,
+            t.tc_threshold,
+        )
+
+    def _get_num_streamlines(self, seeds):
+        t = self.cpu_tracker
+        nseed = len(seeds)
+
+        shDir0      = np.zeros((nseed * t.dimt, 3), dtype=REAL_DTYPE)
+        slineOutOff = np.zeros(nseed + 1, dtype=np.int32)
+
+        self.getNumStreamlinesProb(
             seeds,
             t.dataf,
             t.sphere_vertices,
@@ -86,17 +99,7 @@ class SeedBatchPropagator:
         slineLen  = np.zeros(nSlines, dtype=np.int32)
         sline     = np.zeros((nSlines * MAX_SLINE_LEN * 2, 3), dtype=REAL_DTYPE)
 
-        genStreamlinesMergeProb = genStreamlinesMergeProb_generator(
-            t.dimx,
-            t.dimy,
-            t.dimz,
-            t.dimt,
-            t.full_basis,
-            t.step_size,
-            t.max_angle,
-            t.tc_threshold,
-        )
-        genStreamlinesMergeProb(
+        self.genStreamlinesMergeProb(
             seeds,
             t.dataf,
             t.metric_map,
