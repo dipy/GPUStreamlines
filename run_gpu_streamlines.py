@@ -59,15 +59,11 @@ from trx.io import save as save_trx
 
 from cuslines import (
     BACKEND,
-    HAS_NUMBA,
     BootDirectionGetter,
-    GPUTracker,
+    Tracker,
     ProbDirectionGetter,
     PttDirectionGetter,
 )
-
-if HAS_NUMBA:
-    from cuslines import CPUTracker
 
 t0 = time.time()
 
@@ -203,7 +199,7 @@ elif args.device == "webgpu":
             WebGPUPttDirectionGetter as PttDirectionGetter,
         )
         from cuslines.webgpu import (
-            WebGPUTracker as GPUTracker,
+            WebGPUTracker as Tracker,
         )
     except ImportError:
         raise RuntimeError(
@@ -221,8 +217,18 @@ elif args.device == "webgpu":
 elif args.device == "gpu":
     print("Using %s backend" % BACKEND)
 elif args.device == "numba":
-    if not HAS_NUMBA:
-        raise ImportError("Numba: pip install 'cuslines[numba]' (CPU)")
+    from cuslines.numba import (
+        CPUBootDirectionGetter as BootDirectionGetter,
+    )
+    from cuslines.numba import (
+        CPUProbDirectionGetter as ProbDirectionGetter,
+    )
+    from cuslines.numba import (
+        CPUPttDirectionGetter as PttDirectionGetter,
+    )
+    from cuslines.numba import (
+        CPUTracker as Tracker,
+    )
     print((
         "WARNING: in this script, numba backend only runs probabilistic "
         "tractography on csd, ignoring dg and model"))
@@ -372,9 +378,7 @@ else:
         if args.cache_dir != "":
             np.save(csd_odf_cache_file, data)
     
-    if args.device == "numba":
-        pass
-    elif args.dg == "ptt":
+    if args.dg == "ptt":
         if args.device == "cpu":
             dg = cpu_PTTDirectionGetter
         else:
@@ -417,30 +421,8 @@ if args.device == "cpu":
     sft = StatefulTractogram(streamline_generator, img, Space.VOX)
     n_sls = len(sft.streamlines)
     te = time.time()
-elif args.device == "numba":
-    with CPUTracker(
-        data,
-        FA,
-        args.fa_threshold,
-        sphere.vertices,
-        sphere.edges,
-        full_basis=False,
-        max_angle=args.max_angle * np.pi / 180,
-        step_size=args.step_size,
-        relative_peak_thresh=args.relative_peak_threshold,
-        min_separation_angle=args.min_separation_angle * np.pi / 180,
-        chunk_size=args.chunk_size,
-    ) as cpu_tracker:
-        ts = time.time()
-        if args.output_prefix and write_method == "trx":
-            trx_file = cpu_tracker.generate_trx(seed_mask, img)
-            n_sls = len(trx_file.streamlines)
-        else:
-            sft = cpu_tracker.generate_sft(seed_mask, img)
-            n_sls = len(sft.streamlines)
-        te = time.time()
 else:
-    with GPUTracker(
+    with Tracker(
         dg,
         data,
         FA,

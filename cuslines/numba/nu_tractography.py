@@ -11,12 +11,27 @@ from cuslines.numba_njit.num_streamlines_numba import getNumStreamlinesProb_gene
 from cuslines.numba_njit.generate_streamlines_numba import genStreamlinesMergeProb_generator
 from cuslines.numba.nu_globals import MAX_SLINE_LEN, REAL_DTYPE
 
-# TODO: my thoughts on where this will end up
-# We shoudl mirror this more and more to the GPUStreamlines file,
-# having them both depend on GenericTracker,
-# potentially with CPUProb being a separate DG
-# maybe same for webgpu
-# consider ditching metal
+
+class CPUProbDirectionGetter:
+    pass
+
+class CPUPttDirectionGetter:
+    def __init__(self):
+        raise NotImplementedError(
+        "Only CPU detected. Only ProbDirectionGetter implemented on CPU. \n"
+        "Either switch to ProbDirectionGetter or use a backend. Install either:\n"
+        "  - CUDA: pip install 'cuslines[cu13]' (NVIDIA GPU)\n"
+        "  - Metal: pip install 'cuslines[metal]' (Apple Silicon)\n"
+        "  - WebGPU: pip install 'cuslines[webgpu]' (cross-platform)")
+
+class CPUBootDirectionGetter:
+    def __init__(self):
+        raise NotImplementedError(
+        "Only CPU detected. Only ProbDirectionGetter implemented on CPU. \n"
+        "Either switch to ProbDirectionGetter or use a backend. Install either:\n"
+        "  - CUDA: pip install 'cuslines[cu13]' (NVIDIA GPU)\n"
+        "  - Metal: pip install 'cuslines[metal]' (Apple Silicon)\n"
+        "  - WebGPU: pip install 'cuslines[webgpu]' (cross-platform)")
 
 class SeedBatchPropagator:
     def __init__(self, cpu_tracker, minlen: int = 0, maxlen: float = np.inf):
@@ -142,6 +157,10 @@ class CPUTracker(GenericTracker):
 
     Parameters
     ----------
+    dg :  DirectionGetter
+        Direction getter to use.
+        Can only be CPUProbDirectionGetter.
+        Maintained to match API with other backends.
     dataf : np.ndarray, shape (dimx, dimy, dimz, dimt)
         ODF volume.
     stop_map : np.ndarray, shape (dimx, dimy, dimz)
@@ -164,14 +183,22 @@ class CPUTracker(GenericTracker):
         Relative peak threshold for direction selection. Default: 0.25.
     min_separation_angle : float
         Minimum separation angle (radians) between peaks. Default: radians(45).
-    rng_seed : int
-        Base RNG seed. Default: 0.
+    ngpus : int, optional
+        Ignored. Maintained to match API with other backends.
+        default: 1
+    rng_seed : int, optional
+        Seed for random number generator
+        default: 0
+    rng_offset : int, optional
+        Ignored. Maintained to match API with other backends.
+        default: 0
     chunk_size : int
-        Seeds per propagate() call in generate_sft(). Default: 25000.
+        Seeds per propagate() call in generate_sft(). Default: 100000.
     """
 
     def __init__(
         self,
+        dg: object,
         dataf: np.ndarray,
         stop_map: np.ndarray,
         stop_threshold: float,
@@ -184,8 +211,10 @@ class CPUTracker(GenericTracker):
         max_pts: float = np.inf,
         relative_peak_thresh: float = 0.25,
         min_separation_angle: float = radians(45),
+        ngpus: int = 1,
         rng_seed: int = 0,
-        chunk_size: int = 25000,
+        rng_offset: int = 0,
+        chunk_size: int = 100000,
     ):
         self.dataf           = np.ascontiguousarray(dataf,           dtype=REAL_DTYPE)
         self.metric_map      = np.ascontiguousarray(stop_map,        dtype=REAL_DTYPE)
