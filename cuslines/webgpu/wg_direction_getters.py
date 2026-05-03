@@ -36,11 +36,11 @@ class WebGPUDirectionGetter(ABC):
     def generateStreamlines(self, nseeds_gpu, block, grid, sp):
         pass
 
-    def setup_device(self, device, has_subgroups=True):
+    def setup_device(self, device, has_subgroups=True, full_basis=False):
         """Called once when WebGPUTracker allocates resources."""
         pass
 
-    def compile_program(self, device, has_subgroups=True):
+    def compile_program(self, device, has_subgroups=True, full_basis=False):
         start_time = time()
         logger.info("Compiling WebGPU/WGSL shaders...")
 
@@ -84,6 +84,10 @@ class WebGPUDirectionGetter(ABC):
                 source_parts.append(f.read())
 
         full_source = "\n".join(source_parts)
+
+        # Prepend compile-time constants
+        full_basis_val = 1 if full_basis else 0
+        full_source = f"const FULL_BASIS: u32 = {full_basis_val}u;\n" + full_source
 
         shader_module = device.create_shader_module(code=full_source)
         self.shader_module = shader_module
@@ -130,8 +134,8 @@ class WebGPUProbDirectionGetter(WebGPUDirectionGetter):
     def _shader_files(self):
         return []
 
-    def setup_device(self, device, has_subgroups=True):
-        self.compile_program(device, has_subgroups)
+    def setup_device(self, device, has_subgroups=True, full_basis=False):
+        self.compile_program(device, has_subgroups, full_basis)
         self.getnum_pipeline = self._make_pipeline(device, "getNumStreamlinesProb_k")
         self.gen_pipeline = self._make_pipeline(device, "genStreamlinesMergeProb_k")
 
@@ -241,8 +245,8 @@ class WebGPUPttDirectionGetter(WebGPUProbDirectionGetter):
     def _shader_files(self):
         return ["disc.wgsl", "ptt.wgsl"]
 
-    def setup_device(self, device, has_subgroups=True):
-        self.compile_program(device, has_subgroups)
+    def setup_device(self, device, has_subgroups=True, full_basis=False):
+        self.compile_program(device, has_subgroups, full_basis)
         # PTT reuses Prob's getNum kernel for initial direction finding
         self.getnum_pipeline = self._make_pipeline(device, "getNumStreamlinesProb_k")
         # PTT has its own gen kernel
@@ -331,8 +335,8 @@ class WebGPUBootDirectionGetter(WebGPUDirectionGetter):
         # boot.wgsl is self-contained (has its own buffer bindings, params, entry points)
         return []
 
-    def setup_device(self, device, has_subgroups=True):
-        self.compile_program(device, has_subgroups)
+    def setup_device(self, device, has_subgroups=True, full_basis=False):
+        self.compile_program(device, has_subgroups, full_basis)
         self.getnum_pipeline = self._make_pipeline(device, "getNumStreamlinesBoot_k")
         self.gen_pipeline = self._make_pipeline(device, "genStreamlinesMergeBoot_k")
 

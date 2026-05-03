@@ -127,7 +127,7 @@ inline int get_direction_prob(thread PhiloxState& st,
         for (int i = int(tidx); i < dimt; i += THR_X_SL) {
             float3 sv = load_f3(sphere_vertices, uint(i));
             const float dot = dir.x * sv.x + dir.y * sv.y + dir.z * sv.z;
-            if (FABS(dot) < cos_similarity) {
+            if (APPLY_ABS_IF_SYM(dot) < cos_similarity) {
                 pmf_data_sh[i] = 0.0f;
             }
         }

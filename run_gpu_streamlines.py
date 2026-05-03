@@ -60,7 +60,7 @@ from trx.io import save as save_trx
 from cuslines import (
     BACKEND,
     BootDirectionGetter,
-    GPUTracker,
+    Tracker,
     ProbDirectionGetter,
     PttDirectionGetter,
 )
@@ -101,8 +101,8 @@ parser.add_argument(
     "--device",
     type=str,
     default="gpu",
-    choices=["cpu", "gpu", "metal", "webgpu"],
-    help="Whether to use cpu, gpu (auto-detect), metal, or webgpu",
+    choices=["cpu", "gpu", "metal", "webgpu", "numba"],
+    help="Whether to use cpu, gpu (auto-detect), metal, webgpu, or numba",
 )
 parser.add_argument(
     "--sphere",
@@ -199,7 +199,7 @@ elif args.device == "webgpu":
             WebGPUPttDirectionGetter as PttDirectionGetter,
         )
         from cuslines.webgpu import (
-            WebGPUTracker as GPUTracker,
+            WebGPUTracker as Tracker,
         )
     except ImportError:
         raise RuntimeError(
@@ -216,6 +216,24 @@ elif args.device == "webgpu":
     args.device = "gpu"  # use the GPU code path
 elif args.device == "gpu":
     print("Using %s backend" % BACKEND)
+elif args.device == "numba":
+    from cuslines.numba import (
+        CPUBootDirectionGetter as BootDirectionGetter,
+    )
+    from cuslines.numba import (
+        CPUProbDirectionGetter as ProbDirectionGetter,
+    )
+    from cuslines.numba import (
+        CPUPttDirectionGetter as PttDirectionGetter,
+    )
+    from cuslines.numba import (
+        CPUTracker as Tracker,
+    )
+    print((
+        "WARNING: in this script, numba backend only runs probabilistic "
+        "tractography on csd, ignoring dg and model"))
+    args.dg = "prob"
+    args.model = "csd"
 
 if args.device == "cpu" and args.write_method != "trk":
     print("WARNING: only trk write method is implemented for cpu testing.")
@@ -299,6 +317,7 @@ if args.sphere == "small":
     sphere = small_sphere
 else:
     sphere = default_sphere
+
 if args.model == "opdt":
     if args.device == "cpu":
         model = OpdtModel(
@@ -358,16 +377,17 @@ else:
 
         if args.cache_dir != "":
             np.save(csd_odf_cache_file, data)
+    
     if args.dg == "ptt":
         if args.device == "cpu":
-            dg = cpu_PTTDirectionGetter()
+            dg = cpu_PTTDirectionGetter
         else:
             # Set FOD to 0 outside mask for probing
             data[FA < args.fa_threshold, :] = 0
             dg = PttDirectionGetter()
     elif args.dg == "prob":
         if args.device == "cpu":
-            dg = cpu_ProbDirectionGetter()
+            dg = cpu_ProbDirectionGetter
         else:
             dg = ProbDirectionGetter()
     else:
@@ -394,15 +414,15 @@ if args.device == "cpu":
             min_separation_angle=args.min_separation_angle,
         )
 
-        ts = time.time()
-        streamline_generator = LocalTracking(
-            dg, tissue_classifier, seed_mask, affine=np.eye(4), step_size=args.step_size
-        )
-        sft = StatefulTractogram(streamline_generator, img, Space.VOX)
-        n_sls = len(sft.streamlines)
-        te = time.time()
+    ts = time.time()
+    streamline_generator = LocalTracking(
+        dg, tissue_classifier, seed_mask, affine=np.eye(4), step_size=args.step_size
+    )
+    sft = StatefulTractogram(streamline_generator, img, Space.VOX)
+    n_sls = len(sft.streamlines)
+    te = time.time()
 else:
-    with GPUTracker(
+    with Tracker(
         dg,
         data,
         FA,

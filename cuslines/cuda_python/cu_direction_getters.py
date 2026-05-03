@@ -82,6 +82,7 @@ class GPUDirectionGetter(ABC):
             "RNG_SEED": str(int(gpu_tracker.rng_seed)),
             "SAMPLM_NR": str(int(gpu_tracker.samplm_nr)),
             "NUM_EDGES": str(int(gpu_tracker.nedges)),
+            "FULL_BASIS": "1" if gpu_tracker.full_basis else "0",
             "EXCESS_ALLOC_FACT": str(int(EXCESS_ALLOC_FACT)),
             "MAX_SLINES_PER_SEED": str(int(MAX_SLINES_PER_SEED)),
             "MAX_SLINE_LEN": str(int(MAX_SLINE_LEN)),

@@ -30,7 +30,6 @@ def _detect_backend():
         pass
     return None
 
-
 BACKEND = _detect_backend()
 
 if BACKEND == "metal":
@@ -38,7 +37,7 @@ if BACKEND == "metal":
         MetalBootDirectionGetter as BootDirectionGetter,
     )
     from cuslines.metal import (
-        MetalGPUTracker as GPUTracker,
+        MetalGPUTracker as Tracker,
     )
     from cuslines.metal import (
         MetalProbDirectionGetter as ProbDirectionGetter,
@@ -49,7 +48,7 @@ if BACKEND == "metal":
 elif BACKEND == "cuda":
     from cuslines.cuda_python import (
         BootDirectionGetter,
-        GPUTracker,
+        GPUTracker as Tracker,
         ProbDirectionGetter,
         PttDirectionGetter,
     )
@@ -64,18 +63,24 @@ elif BACKEND == "webgpu":
         WebGPUPttDirectionGetter as PttDirectionGetter,
     )
     from cuslines.webgpu import (
-        WebGPUTracker as GPUTracker,
+        WebGPUTracker as Tracker,
     )
 else:
-    raise ImportError(
-        "No GPU backend available. Install either:\n"
-        "  - CUDA: pip install 'cuslines[cu13]' (NVIDIA GPU)\n"
-        "  - Metal: pip install 'cuslines[metal]' (Apple Silicon)\n"
-        "  - WebGPU: pip install 'cuslines[webgpu]' (cross-platform)"
+    from cuslines.numba import (
+        CPUBootDirectionGetter as BootDirectionGetter,
+    )
+    from cuslines.numba import (
+        CPUProbDirectionGetter as ProbDirectionGetter,
+    )
+    from cuslines.numba import (
+        CPUPttDirectionGetter as PttDirectionGetter,
+    )
+    from cuslines.numba import (
+        CPUTracker as Tracker,
     )
 
 __all__ = [
-    "GPUTracker",
+    "Tracker",
     "ProbDirectionGetter",
     "PttDirectionGetter",
     "BootDirectionGetter",

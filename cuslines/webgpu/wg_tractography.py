@@ -35,6 +35,7 @@ class WebGPUTracker:
         stop_threshold: float,
         sphere_vertices: np.ndarray,
         sphere_edges: np.ndarray,
+        full_basis: bool = False,
         max_angle: float = radians(60),
         step_size: float = 0.5,
         min_pts=0,
@@ -63,6 +64,7 @@ class WebGPUTracker:
         self.n32dimt = ((self.dimt + 31) // 32) * 32
 
         self.dg = dg
+        self.full_basis = bool(full_basis)
         self.max_angle = np.float32(max_angle)
         self.tc_threshold = np.float32(stop_threshold)
         self.step_size = np.float32(step_size)
@@ -176,7 +178,7 @@ class WebGPUTracker:
                 self.device, self.sphere_edges.ravel(), label="sphere_edges"
             )
 
-            self.dg.setup_device(self.device, self.has_subgroups)
+            self.dg.setup_device(self.device, self.has_subgroups, self.full_basis)
         except Exception:
             # Clean up any partially allocated buffers
             self.dataf_buf = None

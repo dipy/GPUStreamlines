@@ -206,9 +206,10 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
 
                                 int j = 0;
                                 for(; j < k; j++) {
-                                        const REAL_T cos = FABS(abc.x*dirs[j].x+
-                                                                abc.y*dirs[j].y+
-                                                                abc.z*dirs[j].z);
+                                        const REAL_T cos = APPLY_ABS_IF_SYM(
+                                                abc.x*dirs[j].x+
+                                                abc.y*dirs[j].y+
+                                                abc.z*dirs[j].z);
                                         if (cos > cos_similarity) {
                                                 break;
                                         }

@@ -148,7 +148,7 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                                            dir.y*sphere_vertices[i].y+
                                            dir.z*sphere_vertices[i].z;
 
-                        if (FABS(dot) < cos_similarity) {
+                        if (APPLY_ABS_IF_SYM(dot) < cos_similarity) {
                                 __pmf_data_sh[i] = 0.0;
                         }
                 }
