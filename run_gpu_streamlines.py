@@ -102,7 +102,7 @@ parser.add_argument(
     type=str,
     default="gpu",
     choices=["cpu", "gpu", "metal", "webgpu", "numba"],
-    help="Whether to use cpu, gpu (auto-detect), metal, or webgpu",
+    help="Whether to use cpu, gpu (auto-detect), metal, webgpu, or numba",
 )
 parser.add_argument(
     "--sphere",
@@ -429,7 +429,6 @@ else:
         args.fa_threshold,
         sphere.vertices,
         sphere.edges,
-        full_basis=False,
         max_angle=args.max_angle * np.pi / 180,
         step_size=args.step_size,
         relative_peak_thresh=args.relative_peak_threshold,

@@ -1,9 +1,12 @@
+import logging
 import numpy as np
 from tqdm import tqdm
 from trx.trx_file_memmap import TrxFile
 from dipy.io.stateful_tractogram import Space, StatefulTractogram
 from nibabel.streamlines.array_sequence import ArraySequence
 from nibabel.streamlines.tractogram import Tractogram
+
+logger = logging.getLogger("GPUStreamlines")
 
 
 class GenericTracker:
