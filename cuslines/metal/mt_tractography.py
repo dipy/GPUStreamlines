@@ -73,7 +73,7 @@ class MetalGPUTracker:
         stop_threshold: float,
         sphere_vertices: np.ndarray,
         sphere_edges: np.ndarray,
-        full_basis: bool = False,
+        sphere_symm: bool = False,
         max_angle: float = radians(60),
         step_size: float = 0.5,
         min_pts=0,
@@ -107,7 +107,7 @@ class MetalGPUTracker:
         self.n32dimt = ((self.dimt + 31) // 32) * 32
 
         self.dg = dg
-        self.full_basis = bool(full_basis)
+        self.sphere_symm = bool(sphere_symm)
         self.max_angle = np.float32(max_angle)
         self.tc_threshold = np.float32(stop_threshold)
         self.step_size = np.float32(step_size)
@@ -157,7 +157,7 @@ class MetalGPUTracker:
         self.sphere_vertices_buf = _make_shared_buffer(self.device, self.sphere_vertices)
         self.sphere_edges_buf = _make_shared_buffer(self.device, self.sphere_edges)
 
-        self.dg.setup_device(self.device, self.full_basis)
+        self.dg.setup_device(self.device, self.sphere_symm)
         self._allocated = True
 
     def __exit__(self, exc_type, exc, tb):

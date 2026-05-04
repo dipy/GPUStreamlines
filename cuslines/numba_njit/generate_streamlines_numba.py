@@ -6,7 +6,7 @@ from cuslines.numba_njit.tracking_helpers import trilinear_interp_generator
 from cuslines.numba.nu_globals import MAX_SLINE_LEN, PMF_THRESHOLD_P
 
 
-def genStreamlinesMergeProb_generator(DIMX, DIMY, DIMZ, DIMT, FULL_BASIS, STEP_SIZE, MAX_ANGLE, TC_THRESHOLD):
+def genStreamlinesMergeProb_generator(DIMX, DIMY, DIMZ, DIMT, SPHERE_SYMM, STEP_SIZE, MAX_ANGLE, TC_THRESHOLD):
     trilinear_interp = trilinear_interp_generator(DIMX, DIMY, DIMZ, DIMT)
 
     @njit
@@ -74,7 +74,7 @@ def genStreamlinesMergeProb_generator(DIMX, DIMY, DIMZ, DIMT, FULL_BASIS, STEP_S
             dot = (direction[0] * sphere_vertices[i, 0] +
                 direction[1] * sphere_vertices[i, 1] +
                 direction[2] * sphere_vertices[i, 2])
-            if not FULL_BASIS:
+            if SPHERE_SYMM:
                 if dot < 0.0:
                     dot = -dot
             if dot < cos_sim:
@@ -102,7 +102,7 @@ def genStreamlinesMergeProb_generator(DIMX, DIMY, DIMZ, DIMT, FULL_BASIS, STEP_S
         ind_prob = low
 
         # 5  flip vertex to match current hemisphere
-        if not FULL_BASIS:
+        if SPHERE_SYMM:
             dot = (direction[0] * sphere_vertices[ind_prob, 0] +
                 direction[1] * sphere_vertices[ind_prob, 1] +
                 direction[2] * sphere_vertices[ind_prob, 2])

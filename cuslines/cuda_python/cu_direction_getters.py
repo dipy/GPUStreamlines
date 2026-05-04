@@ -82,7 +82,7 @@ class GPUDirectionGetter(ABC):
             "RNG_SEED": str(int(gpu_tracker.rng_seed)),
             "SAMPLM_NR": str(int(gpu_tracker.samplm_nr)),
             "NUM_EDGES": str(int(gpu_tracker.nedges)),
-            "FULL_BASIS": "1" if gpu_tracker.full_basis else "0",
+            "SPHERE_SYMM": "1" if gpu_tracker.sphere_symm else "0",
             "EXCESS_ALLOC_FACT": str(int(EXCESS_ALLOC_FACT)),
             "MAX_SLINES_PER_SEED": str(int(MAX_SLINES_PER_SEED)),
             "MAX_SLINE_LEN": str(int(MAX_SLINE_LEN)),
@@ -529,7 +529,7 @@ class PttDirectionGetter(ProbDirectionGetter):
                 hard_error=False,
             )
 
-    def prepare_data(self, dataf, stop_map, stop_threshold, sphere_vertices):
+    def prepare_data(self, dataf, stop_map, stop_threshold, sphere_vertices, sphere_symm):
         dimx, dimy, dimz, dimt = dataf.shape
         dataf = dataf.clip(min=0)
 
@@ -585,8 +585,18 @@ class PttDirectionGetter(ProbDirectionGetter):
         grid_x, grid_y, grid_z = np.meshgrid(coords, coords, coords, indexing="ij")
         grid_points = np.stack([grid_x.ravel(), grid_y.ravel(), grid_z.ravel()], axis=1)
 
-        tree = KDTree(sphere_vertices)
-        _, closest_indices = tree.query(grid_points)
+        if sphere_symm:
+            symmetric_vertices = np.concatenate([sphere_vertices, -sphere_vertices], axis=0)
+            num_orig = len(sphere_vertices)
+            index_map = np.concatenate([np.arange(num_orig), np.arange(num_orig)], axis=0)
+
+            tree = KDTree(symmetric_vertices)
+            _, closest_augmented_indices = tree.query(grid_points)
+            closest_indices = index_map[closest_augmented_indices]
+        else:
+            tree = KDTree(sphere_vertices)
+            _, closest_indices = tree.query(grid_points)
+
         lut = closest_indices.reshape(
             (self.odf_lut_res, self.odf_lut_res, self.odf_lut_res)
         )

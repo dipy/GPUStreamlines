@@ -5,7 +5,7 @@ from cuslines.numba_njit.tracking_helpers import trilinear_interp_generator
 from cuslines.numba.nu_globals import PMF_THRESHOLD_P
 
 
-def getNumStreamlinesProb_generator(DIMX, DIMY, DIMZ, DIMT, RELATIVE_PEAK_THRESH, MIN_SEPARATION_ANGLE, NUM_EDGES, FULL_BASIS):
+def getNumStreamlinesProb_generator(DIMX, DIMY, DIMZ, DIMT, RELATIVE_PEAK_THRESH, MIN_SEPARATION_ANGLE, NUM_EDGES, SPHERE_SYMM):
     trilinear_interp = trilinear_interp_generator(DIMX, DIMY, DIMZ, DIMT)
 
     @njit
@@ -87,7 +87,7 @@ def getNumStreamlinesProb_generator(DIMX, DIMY, DIMZ, DIMT, RELATIVE_PEAK_THRESH
             too_close = False
             for j in range(k):
                 dot = ax * dirs_out[j, 0] + ay * dirs_out[j, 1] + az * dirs_out[j, 2]
-                if not FULL_BASIS:
+                if SPHERE_SYMM:
                     if dot < 0.0:
                         dot = -dot
                 if dot > cos_sim:

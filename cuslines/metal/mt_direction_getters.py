@@ -42,11 +42,11 @@ class MetalGPUDirectionGetter(ABC):
     def generateStreamlines(self, nseeds_gpu, block, grid, sp):
         pass
 
-    def setup_device(self, device, full_basis=False):
+    def setup_device(self, device, sphere_symm=False):
         """Called once when GPUTracker allocates resources."""
         pass
 
-    def compile_program(self, device, full_basis=False):
+    def compile_program(self, device, sphere_symm=False):
         import Metal
         import re
 
@@ -96,9 +96,9 @@ class MetalGPUDirectionGetter(ABC):
 
         # Prepend compile-time constants
         enable = 1 if self.angular_weight > 0 else 0
-        full_basis_define = 1 if full_basis else 0
+        sphere_symm_define = 1 if sphere_symm else 0
         defines = (
-            f"#define FULL_BASIS {full_basis_define}\n"
+            f"#define SPHERE_SYMM {sphere_symm_define}\n"
             f"#define ENABLE_ANGULAR_WEIGHT {enable}\n"
             f"#define ANGULAR_WEIGHT {self.angular_weight:.2f}f\n"
         )
@@ -155,8 +155,8 @@ class MetalProbDirectionGetter(MetalGPUDirectionGetter):
     def _shader_files(self):
         return []
 
-    def setup_device(self, device, full_basis=False):
-        self.compile_program(device, full_basis)
+    def setup_device(self, device, sphere_symm=False):
+        self.compile_program(device, sphere_symm)
         self.getnum_pipeline = self._make_pipeline(device, "getNumStreamlinesProb_k")
         self.gen_pipeline = self._make_pipeline(device, "genStreamlinesMergeProb_k")
 
@@ -251,8 +251,8 @@ class MetalPttDirectionGetter(MetalProbDirectionGetter):
     def _shader_files(self):
         return ["ptt.metal"]
 
-    def setup_device(self, device, full_basis=False):
-        self.compile_program(device, full_basis)
+    def setup_device(self, device, sphere_symm=False):
+        self.compile_program(device, sphere_symm)
         # PTT reuses Prob's getNum kernel for initial direction finding
         self.getnum_pipeline = self._make_pipeline(device, "getNumStreamlinesProb_k")
         # PTT has its own gen kernel with parallel transport frame tracking
@@ -337,10 +337,10 @@ class MetalBootDirectionGetter(MetalGPUDirectionGetter):
     def _shader_files(self):
         return ["boot.metal"]
 
-    def setup_device(self, device, full_basis=False):
+    def setup_device(self, device, sphere_symm=False):
         from cuslines.metal.mt_tractography import _make_shared_buffer
 
-        self.compile_program(device, full_basis)
+        self.compile_program(device, sphere_symm)
         self.getnum_pipeline = self._make_pipeline(device, "getNumStreamlinesBoot_k")
         self.gen_pipeline = self._make_pipeline(device, "genStreamlinesMergeBoot_k")
 

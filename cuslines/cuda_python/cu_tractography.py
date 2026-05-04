@@ -42,7 +42,7 @@ class GPUTracker(GenericTracker):
         stop_threshold: float,
         sphere_vertices: np.ndarray,
         sphere_edges: np.ndarray,
-        full_basis: bool = False,
+        sphere_symm: bool = False,
         max_angle: float = radians(60),
         step_size: float = 0.5,
         min_pts=0,
@@ -73,8 +73,8 @@ class GPUTracker(GenericTracker):
             Vertices of the sphere used for direction sampling.
         sphere_edges : np.ndarray
             Edges of the sphere used for direction sampling.
-        full_basis : bool, optional
-            Whether to use full basis for spherical harmonics
+        sphere_symm : bool, optional
+            Whether to assume sphere vertices are antipodally symmetric
             default: False
         max_angle : float, optional
             Maximum angle (in radians) between steps
@@ -123,6 +123,7 @@ class GPUTracker(GenericTracker):
                 stop_map,
                 stop_threshold,
                 sphere_vertices,
+                sphere_symm,
             )
         else:
             self.dataf = np.ascontiguousarray(dataf, dtype=REAL_DTYPE)
@@ -149,7 +150,7 @@ class GPUTracker(GenericTracker):
         self.rng_seed = int(rng_seed)
         self.rng_offset = int(rng_offset)
         self.chunk_size = int(chunk_size)
-        self.full_basis = bool(full_basis)
+        self.sphere_symm = bool(sphere_symm)
 
         avail = checkCudaErrors(runtime.cudaGetDeviceCount())
         if self.ngpus > avail:

@@ -36,7 +36,7 @@ import dipy.reconst.dti as dti
 import nibabel as nib
 import numpy as np
 from dipy.core.gradients import gradient_table, unique_bvals_magnitude
-from dipy.data import default_sphere, get_fnames, read_stanford_pve_maps, small_sphere
+from dipy.data import default_sphere, get_fnames, read_stanford_pve_maps, small_sphere, HemiSphere
 from dipy.direction import (
     BootDirectionGetter as cpu_BootDirectionGetter,
 )
@@ -429,6 +429,7 @@ else:
         args.fa_threshold,
         sphere.vertices,
         sphere.edges,
+        sphere_symm=isinstance(sphere, HemiSphere),
         max_angle=args.max_angle * np.pi / 180,
         step_size=args.step_size,
         relative_peak_thresh=args.relative_peak_threshold,

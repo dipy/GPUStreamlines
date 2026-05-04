@@ -52,7 +52,7 @@ class SeedBatchPropagator:
             t.relative_peak_thresh,
             t.min_separation_angle,
             t.nedges,
-            t.full_basis,
+            t.sphere_symm,
         )
 
         self.genStreamlinesMergeProb = genStreamlinesMergeProb_generator(
@@ -60,7 +60,7 @@ class SeedBatchPropagator:
             t.dimy,
             t.dimz,
             t.dimt,
-            t.full_basis,
+            t.sphere_symm,
             t.step_size,
             t.max_angle,
             t.tc_threshold,
@@ -207,7 +207,7 @@ class CPUTracker(GenericTracker):
         stop_threshold: float,
         sphere_vertices: np.ndarray,
         sphere_edges: np.ndarray,
-        full_basis: bool = False,
+        sphere_symm: bool = False,
         max_angle: float = radians(60),
         step_size: float = 0.5,
         min_pts: int = 0,
@@ -224,7 +224,7 @@ class CPUTracker(GenericTracker):
         self.sphere_vertices = np.ascontiguousarray(sphere_vertices, dtype=REAL_DTYPE)
         self.sphere_edges    = np.ascontiguousarray(sphere_edges,    dtype=np.int32)
 
-        self.full_basis = full_basis
+        self.sphere_symm = sphere_symm
         self.dimx, self.dimy, self.dimz, self.dimt = dataf.shape
 
         self.max_angle             = float(max_angle)
