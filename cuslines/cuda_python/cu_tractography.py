@@ -136,6 +136,12 @@ class GPUTracker(GenericTracker):
         if isinstance(dg, BootDirectionGetter):
             self.samplm_nr = int(dg.sampling_matrix.shape[0])
         else:
+            if len(self.sphere_vertices) != self.dimt:
+                raise ValueError(
+                    f"Number of sphere vertices ({len(self.sphere_vertices)}) must"
+                    f" match last dimension of dataf ({self.dimt}), "
+                    "because dataf should be an ODF when using prob or ptt tracking"
+                )
             self.samplm_nr = self.dimt
         self.n32dimt = ((self.dimt + 31) // 32) * 32
 

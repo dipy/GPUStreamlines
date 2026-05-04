@@ -79,17 +79,18 @@ template<int BDIM_X,
 __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
                                        REAL3_T *__restrict__ dirs,
                                  const REAL3_T *__restrict__ sphere_vertices,
-                                 const int2 *__restrict__ sphere_edges,
-				 int *__restrict__ __shInd) {
+                                 const int2 *__restrict__ sphere_edges) {
 
         const int tidx = threadIdx.x;
+        const int tidy = threadIdx.y;
 
         const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
         const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
 
         const unsigned int lmask = (1 << lid)-1;
 
-//        __shared__ int __shInd[BDIM_Y][SAMPLM_NR];
+       __shared__ int shInd[BDIM_Y][SAMPLM_NR];
+       int* __shInd = shInd[tidy];
 
         #pragma unroll
         for(int j = tidx; j < SAMPLM_NR; j += BDIM_X) {
@@ -233,7 +234,7 @@ __device__ int peak_directions_d(const REAL_T  *__restrict__ odf,
         __syncwarp(WMASK);
 */
 #else
-        const int indMax = max_d<BDIM_X, SAMPLM_NR>(__shInd[tidy], -1);
+        const int indMax = max_d<BDIM_X, SAMPLM_NR>(SAMPLM_NR, __shInd, -1);
         if (indMax != -1) {
                 __ret = MAKE_REAL3(sphere_vertices[indMax][0],
                                    sphere_vertices[indMax][1],

@@ -27,33 +27,33 @@ __global__ void getNumStreamlinesPtt_k( const int nseed,
         curandStatePhilox4_32_10_t st;
         curand_init(RNG_SEED, gid, 0, &st);
 
-        extern __shared__ REAL_T __sh[];
-        REAL_T *__pmf_data_sh = __sh + tidy*N32DIMT;
+        __shared__ REAL_T pmf_data_sh[BDIM_Y][DIMT];
+        REAL_T* __pmf_data_sh = pmf_data_sh[tidy];
 
         REAL3_T point = seeds[slid];
 
         #pragma unroll
         for (int i = tidx; i < DIMT; i += BDIM_X) {
-                const int grid_col = i & WIDTH_MASK;
-                const int grid_row = i >> LOG2_WIDTH;
+                const int tx = i & WIDTH_MASK;
+                const int ty = (i >> LOG2_X) & HEIGHT_MASK;
+                const int tz = (i >> (LOG2_X + LOG2_Y));
 
-                const REAL_T x_query = (REAL_T)(grid_col * DIMX) + point.x;
-                const REAL_T y_query = (REAL_T)(grid_row * DIMY) + point.y;
-                __pmf_data_sh[i] = tex3D<REAL_T>(*pmf, x_query, y_query, point.z);
+                const REAL_T x_query = (REAL_T)(tx * DIMX) + point.x;
+                const REAL_T y_query = (REAL_T)(ty * DIMY) + point.y;
+                const REAL_T z_query = (REAL_T)(tz * DIMZ) + point.z;
+                __pmf_data_sh[i] = tex3D<REAL_T>(*pmf, x_query, y_query, z_query);
                 if (__pmf_data_sh[i] < PMF_THRESHOLD_P) {
                         __pmf_data_sh[i] = 0.0;
                 }
         }
         __syncwarp(WMASK);
 
-        int *__shInd = reinterpret_cast<int *>(__sh + BDIM_Y*N32DIMT) + tidy*N32DIMT;
         int ndir = peak_directions_d<
             BDIM_X,
             BDIM_Y>(__pmf_data_sh,
                     __shDir,
                     sphere_vertices,
-                    sphere_edges,
-                    __shInd);
+                    sphere_edges);
 
         if (tidx == 0) {
                 slineOutOff[slid] = ndir;

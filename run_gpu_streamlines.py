@@ -36,7 +36,8 @@ import dipy.reconst.dti as dti
 import nibabel as nib
 import numpy as np
 from dipy.core.gradients import gradient_table, unique_bvals_magnitude
-from dipy.data import default_sphere, get_fnames, read_stanford_pve_maps, small_sphere, HemiSphere
+from dipy.data import get_sphere, get_fnames, read_stanford_pve_maps, small_sphere, HemiSphere
+
 from dipy.direction import (
     BootDirectionGetter as cpu_BootDirectionGetter,
 )
@@ -316,7 +317,7 @@ seed_mask = np.asarray(
 if args.sphere == "small":
     sphere = small_sphere
 else:
-    sphere = default_sphere
+    sphere = get_sphere("repulsion724")
 
 if args.model == "opdt":
     if args.device == "cpu":

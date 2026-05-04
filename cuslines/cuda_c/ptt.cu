@@ -31,12 +31,14 @@ __device__ float interp4_d(const float3 pos, const float* frame,
     };
     const int odf_idx = static_cast<int>(tex3D<float>(*sphere_vertices_lut, uvw.z, uvw.y, uvw.x));
 
-    const int grid_col = odf_idx & WIDTH_MASK;
-    const int grid_row = odf_idx >> LOG2_WIDTH;
+    const int tx = odf_idx & WIDTH_MASK;
+    const int ty = (odf_idx >> LOG2_X) & HEIGHT_MASK;
+    const int tz = (odf_idx >> (LOG2_X + LOG2_Y));
 
-    const float x_query = (float)(grid_col * DIMX) + pos.x;
-    const float y_query = (float)(grid_row * DIMY) + pos.y;
-    return tex3D<float>(*pmf, x_query, y_query, pos.z);
+    const float x_query = (float)(tx * DIMX) + pos.x;
+    const float y_query = (float)(ty * DIMY) + pos.y;
+    const float z_query = (float)(tz * DIMZ) + pos.z;
+    return tex3D<float>(*pmf, x_query, y_query, z_query);
 }
 
 __device__ void prepare_propagator_d(float k1, float k2, float arclength,
