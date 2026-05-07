@@ -582,8 +582,7 @@ __device__ int get_direction_boot_d(
                 const int ndir = peak_directions_d<BDIM_X,
                                                    BDIM_Y>(__h_sh, dirs,
                                                            sphere_vertices,
-                                                           sphere_edges,
-							   reinterpret_cast<int *>(__r_sh)); // reuse __r_sh as shInd in func which is large enough
+                                                           sphere_edges);
                 if (NATTEMPTS == 1) { // init=True...
                         return ndir; // and dirs;
                 } else { // init=False...

@@ -31,12 +31,14 @@ __device__ float interp4_d(const float3 pos, const float* frame,
     };
     const int odf_idx = static_cast<int>(tex3D<float>(*sphere_vertices_lut, uvw.z, uvw.y, uvw.x));
 
-    const int grid_col = odf_idx & WIDTH_MASK;
-    const int grid_row = odf_idx >> LOG2_WIDTH;
+    const int tx = odf_idx & WIDTH_MASK;
+    const int ty = (odf_idx >> LOG2_X) & HEIGHT_MASK;
+    const int tz = (odf_idx >> (LOG2_X + LOG2_Y));
 
-    const float x_query = (float)(grid_col * DIMX) + pos.x;
-    const float y_query = (float)(grid_row * DIMY) + pos.y;
-    return tex3D<float>(*pmf, x_query, y_query, pos.z);
+    const float x_query = (float)(tx * DIMX) + pos.x;
+    const float y_query = (float)(ty * DIMY) + pos.y;
+    const float z_query = (float)(tz * DIMZ) + pos.z;
+    return tex3D<float>(*pmf, x_query, y_query, z_query);
 }
 
 __device__ void prepare_propagator_d(float k1, float k2, float arclength,
@@ -231,6 +233,8 @@ __device__ int get_direction_ptt_d(
         }
     }
 
+    __syncwarp(WMASK);
+
     const float first_val = interp4_d(
         pos, __frame_sh, pmf,
         sphere_vertices_lut);
@@ -287,16 +291,13 @@ __device__ int get_direction_ptt_d(
 
     // Move vert to face
     for (int ii = tidx; ii < DISC_FACE_CNT; ii+=BDIM_X) {
-        bool all_verts_valid = 1;
         for (int jj = 0; jj < 3; jj++) {
             float vert_val = __vert_pdf_sh[DISC_FACE[ii*3 + jj]];
             if (vert_val == 0) {
-                all_verts_valid = IS_INIT; // On init, even go with faces that are not fully supported
+                __face_cdf_sh[ii] = 0;
+                break;
             }
             __face_cdf_sh[ii] += vert_val;
-        }
-        if (!all_verts_valid) {
-            __face_cdf_sh[ii] = 0;
         }
     }
     __syncwarp(WMASK);
@@ -456,15 +457,16 @@ __device__ bool init_frame_ptt_d(
         }
     } else {
         if (tidx == 0) {
-            for (int ii = 0; ii < 9; ii++) {
+            for (int ii = 0; ii < 6; ii++) {
                 __frame[ii] = -__frame[ii];
             }
         }
         __syncwarp(WMASK);
     }
     if (tidx == 0) {
-        for (int ii = 0; ii < 9; ii++) {
+        for (int ii = 0; ii < 6; ii++) {
             __frame[9+ii] = -__frame[ii]; // save flipped frame for second run
+            // note that we only flip the tangent and normal, not the binormal
         }
     }
     __syncwarp(WMASK);

@@ -82,6 +82,7 @@ class GPUDirectionGetter(ABC):
             "RNG_SEED": str(int(gpu_tracker.rng_seed)),
             "SAMPLM_NR": str(int(gpu_tracker.samplm_nr)),
             "NUM_EDGES": str(int(gpu_tracker.nedges)),
+            "SPHERE_SYMM": "1" if gpu_tracker.sphere_symm else "0",
             "EXCESS_ALLOC_FACT": str(int(EXCESS_ALLOC_FACT)),
             "MAX_SLINES_PER_SEED": str(int(MAX_SLINES_PER_SEED)),
             "MAX_SLINE_LEN": str(int(MAX_SLINE_LEN)),
@@ -92,8 +93,10 @@ class GPUDirectionGetter(ABC):
         }
         self.set_macros(gpu_tracker)
         optional_macros = [
-            "log2_width",
-            "width_mask",
+            "LOG2_X",
+            "LOG2_Y",
+            "WIDTH_MASK",
+            "HEIGHT_MASK",
             "probe_step_size",
             "max_curvature",
             "probe_quality",
@@ -368,11 +371,7 @@ class ProbDirectionGetter(GPUDirectionGetter):
 
     def getNumStreamlines(self, n, nseeds_gpu, block, grid, sp):
         ker = self.module.get_kernel(self.getnum_kernel_name)
-        shared_memory = (
-            REAL_SIZE * BLOCK_Y * sp.gpu_tracker.n32dimt
-            + np.int32().nbytes * BLOCK_Y * sp.gpu_tracker.n32dimt
-        )
-        config = LaunchConfig(block=block, grid=grid, shmem_size=shared_memory)
+        config = LaunchConfig(block=block, grid=grid, shmem_size=0)
 
         if isinstance(sp.gpu_tracker.dataf_d[n], runtime.cudaTextureObject_t):
             dataf_d_n = sp.gpu_tracker.dataf_d[n].getPtr()
@@ -394,8 +393,7 @@ class ProbDirectionGetter(GPUDirectionGetter):
 
     def generateStreamlines(self, n, nseeds_gpu, block, grid, sp):
         ker = self.module.get_kernel(self.genstreamlines_kernel_name)
-        shared_memory = REAL_SIZE * BLOCK_Y * sp.gpu_tracker.n32dimt
-        config = LaunchConfig(block=block, grid=grid, shmem_size=shared_memory)
+        config = LaunchConfig(block=block, grid=grid, shmem_size=0)
 
         launch(
             sp.gpu_tracker.streams[n],
@@ -456,8 +454,10 @@ class PttDirectionGetter(ProbDirectionGetter):
         self.target_short_step = target_short_step
 
     def set_macros(self, gpu_tracker):
-        self.macros["LOG2_WIDTH"] = str(int(self.log2_width))
-        self.macros["WIDTH_MASK"] = str(int(self.width_mask))
+        self.macros["LOG2_X"] = str(int(self.log2_x))
+        self.macros["LOG2_Y"] = str(int(self.log2_y))
+        self.macros["WIDTH_MASK"] = str(int(self.nx - 1))
+        self.macros["HEIGHT_MASK"] = str(int(self.ny - 1))
         self.macros["PROBE_QUALITY"] = str(float(self.probe_quality))
         self.macros["PROBE_STEP_SIZE"] = str(float(self.probe_length))
         self.macros["STEP_FRAC"] = str(
@@ -528,7 +528,7 @@ class PttDirectionGetter(ProbDirectionGetter):
                 hard_error=False,
             )
 
-    def prepare_data(self, dataf, stop_map, stop_threshold, sphere_vertices):
+    def prepare_data(self, dataf, stop_map, stop_threshold, sphere_vertices, sphere_symm):
         dimx, dimy, dimz, dimt = dataf.shape
         dataf = dataf.clip(min=0)
 
@@ -542,16 +542,36 @@ class PttDirectionGetter(ProbDirectionGetter):
 
         # This rearrangement is for cuda texture memory
         # In particular, for texture memory, we want each dimension
-        # to be less than 65,535, so we tile t across x and y
-        # additionally, we then make the tiles in the x dim
+        # to be less than 2k, so we tile t across x, y, and z,
+        # additionally, we then make the tiles in the dims are
         # a power of 2 to ensure it is fast to calculate indices
         # into the tiles
-        ideal_tiles_per_row = math.ceil(math.sqrt(dimt))
-        self.log2_width = math.ceil(math.log2(ideal_tiles_per_row))
-        tiles_per_row = 1 << self.log2_width
-        self.width_mask = tiles_per_row - 1
-        tiles_per_col = math.ceil(dimt / tiles_per_row)
-        total_slots = tiles_per_row * tiles_per_col
+
+        def calculate_tight_fit(dimt):
+            nx, ny, nz = 1, 1, 1
+            
+            # Keep 64x the smallest dimension until we have enough slots
+            while nx * ny * nz < dimt:
+                if nx <= ny and nx <= nz:
+                    nx *= 2
+                elif ny <= nx and ny <= nz:
+                    ny *= 2
+                else:
+                    nz *= 2
+
+            return nx, ny, nz
+
+        nx, ny, nz = calculate_tight_fit(dimt)
+
+        # these must be saved to be passed as 
+        # macros to the CUDA code
+        self.log2_x = int(math.log2(nx))
+        self.log2_y = int(math.log2(ny))
+        self.nx = nx
+        self.ny = ny
+
+        total_slots = nx * ny * nz
+
         if dimt < total_slots:
             padding = np.zeros((dimx, dimy, dimz, total_slots - dimt), dtype=np.float32)
             data_f_rearranged = np.concatenate([dataf, padding], axis=3)
@@ -559,22 +579,22 @@ class PttDirectionGetter(ProbDirectionGetter):
             data_f_rearranged = dataf
 
         total_memory_usage_gb = (
-            (tiles_per_row * dimx) * (tiles_per_col * dimy) * dimz * 4 / 1e9
+            (nx * dimx) * (ny * dimy) * (nz * dimz) * 4 / 1e9
         )
         logger.info(
             (
                 f"For PTT, we will allocate a 3D texture of size "
-                f"{tiles_per_row * dimx}x{tiles_per_col * dimy}x{dimz} "
+                f"{nx * dimx}x{ny * dimy}x{nz * dimz} "
                 "to store the ODFs on the GPU. This will be in 4 byte floats and use "
                 f"{total_memory_usage_gb:.2f} GB of GPU memory. "
                 "If this is too near your total GPU memory, it will error"
             )
         )
         data_f_rearranged = data_f_rearranged.reshape(
-            dimx, dimy, dimz, tiles_per_col, tiles_per_row
+            dimx, dimy, dimz, nz, ny, nx
         )
-        data_f_rearranged = data_f_rearranged.transpose(2, 3, 1, 4, 0).reshape(
-            dimz, tiles_per_col * dimy, tiles_per_row * dimx
+        data_f_rearranged = data_f_rearranged.transpose(3, 2, 4, 1, 5, 0).reshape(
+            nz * dimz, ny * dimy, nx * dimx
         )
         data_f_rearranged = np.ascontiguousarray(data_f_rearranged, dtype=np.float32)
 
@@ -584,8 +604,18 @@ class PttDirectionGetter(ProbDirectionGetter):
         grid_x, grid_y, grid_z = np.meshgrid(coords, coords, coords, indexing="ij")
         grid_points = np.stack([grid_x.ravel(), grid_y.ravel(), grid_z.ravel()], axis=1)
 
-        tree = KDTree(sphere_vertices)
-        _, closest_indices = tree.query(grid_points)
+        if sphere_symm:
+            symmetric_vertices = np.concatenate([sphere_vertices, -sphere_vertices], axis=0)
+            num_orig = len(sphere_vertices)
+            index_map = np.concatenate([np.arange(num_orig), np.arange(num_orig)], axis=0)
+
+            tree = KDTree(symmetric_vertices)
+            _, closest_augmented_indices = tree.query(grid_points)
+            closest_indices = index_map[closest_augmented_indices]
+        else:
+            tree = KDTree(sphere_vertices)
+            _, closest_indices = tree.query(grid_points)
+
         lut = closest_indices.reshape(
             (self.odf_lut_res, self.odf_lut_res, self.odf_lut_res)
         )

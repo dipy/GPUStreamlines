@@ -64,8 +64,8 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
         const int lid = (threadIdx.y*BDIM_X + threadIdx.x) % 32;
         const unsigned int WMASK = ((1ull << BDIM_X)-1) << (lid & (~(BDIM_X-1)));
 
-	extern __shared__ REAL_T __sh[];
-        REAL_T *__pmf_data_sh = __sh + tidy*N32DIMT;
+        __shared__ REAL_T pmf_data_sh[BDIM_Y][DIMT];
+        REAL_T* __pmf_data_sh = pmf_data_sh[tidy];
 
         // pmf = self.pmf_gen.get_pmf_c(&point[0], pmf)
         __syncwarp(WMASK);
@@ -94,13 +94,11 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
         __syncwarp(WMASK);
 
         if (IS_START) {
-                int *__shInd = reinterpret_cast<int *>(__sh + BDIM_Y*N32DIMT) + tidy*N32DIMT;
                 return peak_directions_d<BDIM_X,
                                          BDIM_Y>(__pmf_data_sh,
                                                  dirs,
                                                  sphere_vertices,
-                                                 sphere_edges,
-                                                 __shInd);
+                                                 sphere_edges);
         } else {
                 REAL_T __tmp;
                 #ifdef DEBUG
@@ -148,7 +146,7 @@ __device__ int get_direction_prob_d(curandStatePhilox4_32_10_t *st,
                                            dir.y*sphere_vertices[i].y+
                                            dir.z*sphere_vertices[i].z;
 
-                        if (FABS(dot) < cos_similarity) {
+                        if (APPLY_ABS_IF_SYM(dot) < cos_similarity) {
                                 __pmf_data_sh[i] = 0.0;
                         }
                 }

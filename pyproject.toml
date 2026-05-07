@@ -39,6 +39,7 @@ readme = "README.md"
 requires-python = ">=3.7"
 dependencies = [
     "numpy",
+    "numba",
     "nibabel",
     "tqdm",
     "dipy",
