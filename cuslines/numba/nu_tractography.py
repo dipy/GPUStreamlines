@@ -2,9 +2,7 @@ import math
 from math import radians
 
 import numpy as np
-from dipy.io.stateful_tractogram import Space, StatefulTractogram
 from nibabel.streamlines.array_sequence import ArraySequence, MEGABYTE
-from tqdm import tqdm
 
 from cuslines.generic_tracker import GenericTracker
 from cuslines.numba_njit.num_streamlines_numba import getNumStreamlinesProb_generator

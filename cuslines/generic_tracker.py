@@ -81,6 +81,9 @@ class GenericTracker:
                     self.seed_propagator.as_array_sequence(),
                     affine_to_rasmm=ref_img.affine,
                 )
+                if len(tractogram) == 0:
+                    continue
+
                 tractogram.to_world()
                 sls = tractogram.streamlines
 
