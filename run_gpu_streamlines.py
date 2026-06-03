@@ -127,7 +127,7 @@ parser.add_argument(
 parser.add_argument(
     "--ngpus", type=int, default=1, help="number of GPUs to use if using gpu"
 )
-parser.add_argument("--write-method", type=str, default="trk", help="Can be trx or trk")
+parser.add_argument("--write-method", type=str, default="trx", help="Can be trx or trk")
 parser.add_argument(
     "--max-angle", type=float, default=60, help="max angle (in degrees)"
 )
