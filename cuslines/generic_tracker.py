@@ -56,7 +56,7 @@ class GenericTracker:
         return getattr(self, "ngpus", 1)
 
     def _pos_dtype(self):
-        return getattr(self, "pos_dtype", np.float16)
+        return getattr(self, "pos_dtype", np.float32)
 
     def _linearize(self):
         return getattr(self, "linearize", False)
@@ -65,7 +65,7 @@ class GenericTracker:
         return getattr(self, "tol_error", 0.1)
 
     def _max_segment_length(self):
-        return getattr(self, "max_segment_length", np.inf)
+        return getattr(self, "max_segment_length", 10)
 
     def _divide_chunks(self, seeds):
         global_chunk_sz = self.chunk_size * self._ngpus()
